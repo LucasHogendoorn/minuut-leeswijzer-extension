@@ -3,21 +3,165 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Leeswijzer · Welkom en privacy</title>
+    <title>Leeswijzer · Welkom en instellingen</title>
     <link rel="stylesheet" href="../src/tokens.css" />
     <link rel="stylesheet" href="../src/mascot.css" />
     <link rel="stylesheet" href="options.css" />
   </head>
   <body>
-    <main class="page">
+    <!-- ===== Welcome: three steps, shown once after install (?welkom) ===== -->
+    <main class="page ob" id="onboarding" hidden>
+      <header class="ob-head">
+        <div class="ob-mascot" id="ob-mascot"></div>
+        <p class="eyebrow">Minuut Leeswijzer</p>
+        <div class="ob-progress" aria-label="Voortgang">
+          <span class="ob-dots" id="ob-dots" aria-hidden="true"></span>
+          <span class="ob-count" id="ob-count"></span>
+        </div>
+      </header>
+
+      <div class="ob-track" id="ob-track">
+        <!-- Step 1: how much to show -->
+        <section class="ob-step" data-step="0" aria-labelledby="ob-t1">
+          <h1 id="ob-t1">Leeswijzer is geïnstalleerd. Nog een paar stappen.</h1>
+          <p class="lede">Kies hoeveel u wilt zien.</p>
+          <div class="pick" role="radiogroup" aria-label="Hoe kieskeurig">
+            <label class="pick-opt">
+              <input type="radio" name="strictness-ob" value="minder" />
+              <span class="pick-body">
+                <b>Kieskeuriger</b>
+                <em>Alleen wat de beslissing echt draagt.</em>
+              </span>
+            </label>
+            <label class="pick-opt">
+              <input type="radio" name="strictness-ob" value="standaard" />
+              <span class="pick-body">
+                <b>Standaard</b>
+                <em>De afgestemde instelling.</em>
+              </span>
+            </label>
+            <label class="pick-opt">
+              <input type="radio" name="strictness-ob" value="meer" />
+              <span class="pick-body">
+                <b>Minder kieskeurig</b>
+                <em>Ook wat de vraag zijdelings raakt.</em>
+              </span>
+            </label>
+          </div>
+          <div class="preview" aria-live="polite">
+            <div class="preview-head">
+              <span>Ter illustratie: een uitspraak met 10 overwegingen</span>
+              <b data-preview-count></b>
+            </div>
+            <div class="preview-doc" data-preview-doc></div>
+          </div>
+          <p class="note">Later aan te passen in de instellingen.</p>
+        </section>
+
+        <!-- Step 2: pin the extension -->
+        <section class="ob-step" data-step="1" aria-labelledby="ob-t2" hidden>
+          <h1 id="ob-t2">Zet de Leeswijzer in de werkbalk</h1>
+          <p class="lede">Dan ziet u het pictogram altijd, en zet u het paneel er met één klik mee aan of uit. Zo gaat het in Chrome:</p>
+
+          <div class="chrome-wrap" id="chrome-wrap"><div class="chrome" id="chrome" aria-hidden="true">
+            <div class="c-tabs"><span class="c-tab"><img src="../icons/icon-16.png" alt="" width="14" height="14" class="c-tab-fav" /><span>Uitspraak · Rechtspraak.nl</span></span></div>
+            <div class="c-bar">
+              <span class="c-nav"><i></i><i></i><i></i></span>
+              <span class="c-omni"><svg viewBox="0 0 16 16"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>uitspraken.rechtspraak.nl</span>
+              <span class="c-icons">
+                <span class="c-lw" id="c-lw"><img src="../icons/icon-32.png" alt="" width="18" height="18" /></span>
+                <span class="c-puzzle" id="c-puzzle"><svg viewBox="0 0 20 20"><path d="M8 2.5a1.75 1.75 0 0 1 1.75 1.75V5h2.5A1.75 1.75 0 0 1 14 6.75v2.5h.75a1.75 1.75 0 1 1 0 3.5H14v2.5A1.75 1.75 0 0 1 12.25 17h-2.5v-.75a1.75 1.75 0 1 0-3.5 0V17h-2.5A1.75 1.75 0 0 1 2 15.25v-2.5h.75a1.75 1.75 0 1 0 0-3.5H2v-2.5A1.75 1.75 0 0 1 3.75 5h2.5v-.75A1.75 1.75 0 0 1 8 2.5z" fill="currentColor"/></svg><span class="c-num">1</span></span>
+                <span class="c-avatar"></span>
+                <span class="c-more"><i></i><i></i><i></i></span>
+              </span>
+            </div>
+            <div class="c-menu" id="c-menu">
+              <div class="c-menu-title">Extensies</div>
+              <div class="c-menu-row">
+                <img src="../icons/icon-32.png" alt="" width="18" height="18" />
+                <span class="c-menu-name">Minuut Leeswijzer</span>
+                <span class="c-pin" id="c-pin"><svg viewBox="0 0 20 20"><path d="M12.5 2.5 17.5 7.5l-2 1-2.6 2.6.3 3.4-1.4 1.4-3.3-3.3L4 17.1 2.9 16l4.5-4.5-3.3-3.3 1.4-1.4 3.4.3L11.5 4.5z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg><span class="c-num">2</span></span>
+              </div>
+              <div class="c-menu-foot">Extensies beheren</div>
+            </div>
+            <div class="c-page"><i style="width:38%"></i><i style="width:92%"></i><i style="width:86%"></i><i style="width:90%"></i><i style="width:64%"></i></div>
+            <span class="c-num c-num-3" id="c-num-3">3</span>
+            <svg class="c-cursor" id="c-cursor" viewBox="0 0 20 24"><path d="M3 2l14 11.5-6.3.6 3.6 7.1-2.4 1.1-3.5-7.1L3 19.7z" fill="#fff" stroke="#111" stroke-width="1.4" stroke-linejoin="round"/></svg>
+          </div></div>
+
+          <ol class="how">
+            <li><span>1</span><div>Klik rechtsboven op het puzzelstukje <i>Extensies</i>.</div></li>
+            <li><span>2</span><div>Klik op de punaise naast <i>Minuut Leeswijzer</i>.</div></li>
+            <li><span>3</span><div>Het pictogram staat nu in de werkbalk.</div></li>
+          </ol>
+          <p class="pin-state" id="pin-state" data-pinned="false">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path class="pin-check" d="m5 8.2 2 2 4-4.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span id="pin-text">Nog niet in de werkbalk. U kunt dit ook later doen.</span>
+          </p>
+        </section>
+
+        <!-- Step 3: where it works, with an example -->
+        <section class="ob-step" data-step="2" aria-labelledby="ob-t3" hidden>
+          <h1 id="ob-t3">Leeswijzer werkt op <span id="sites-title">Rechtspraak.nl, Curia en EUR-Lex</span></h1>
+          <p class="lede">Open een uitspraak op een van deze sites en de Leeswijzer leest mee. Op Rechtspraak.nl beoordeelt hij met een rechtsvraag ook de zoekresultaten: ja, deels of nee.</p>
+          <ul class="sites" id="sites"></ul>
+          <div class="example">
+            <div class="example-text">
+              <b>Zie het in een echte uitspraak</b>
+              <span>De rondleiding opent het Haviltex-arrest (HR 13 maart 1981) in een nieuw tabblad en wijst daar stap voor stap aan wat elke knop doet. Ongeveer twee minuten.</span>
+            </div>
+            <button type="button" class="primary" id="open-example">Start de rondleiding</button>
+          </div>
+          <p class="note">Liever zelf beginnen? <a href="https://uitspraken.rechtspraak.nl/" target="_blank" rel="noopener">Naar Rechtspraak.nl</a></p>
+        </section>
+      </div>
+
+      <footer class="ob-foot">
+        <div class="ob-nav">
+          <button type="button" class="ghost" id="ob-back" hidden>Terug</button>
+          <button type="button" class="primary" id="ob-next">Volgende</button>
+        </div>
+        <p class="ob-privacy">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+          <span>Uw vraag blijft privé. <a href="options.html" id="to-settings">Alle privacyfeiten en instellingen</a></span>
+        </p>
+      </footer>
+    </main>
+
+    <!-- ===== Settings and privacy: from the panel's gear, or later ===== -->
+    <main class="page" id="settings" hidden>
       <header class="hero">
         <div class="hero-mascot" id="mascot"></div>
-        <p class="eyebrow r1" id="eyebrow">Minuut Leeswijzer</p>
-        <h1 class="r2" id="title">Leeswijzer voor Rechtspraak.nl, Curia en EUR-Lex</h1>
+        <p class="eyebrow r1">Minuut Leeswijzer</p>
+        <h1 class="r2">Instellingen en privacy</h1>
         <p class="lede r3">Leeswijzer toont in elke uitspraak op Rechtspraak.nl, Curia en EUR-Lex de kernoverwegingen, en met een rechtsvraag ook wat daarover gaat. Gratis, zonder account.</p>
       </header>
 
-      <section class="card privacy r4">
+      <section class="card r4">
+        <h2>Hoe kieskeurig</h2>
+        <p class="card-lede">Bepaalt hoeveel overwegingen en zoekresultaten als relevant tellen. Open tabbladen passen zich meteen aan.</p>
+        <div class="seg" role="radiogroup" aria-label="Hoe kieskeurig">
+          <label><input type="radio" name="strictness" value="minder" /><span>Kieskeuriger</span></label>
+          <label><input type="radio" name="strictness" value="standaard" /><span>Standaard</span></label>
+          <label><input type="radio" name="strictness" value="meer" /><span>Minder kieskeurig</span></label>
+        </div>
+        <div class="preview preview-compact" aria-live="polite">
+          <div class="preview-head">
+            <span>Ter illustratie: een uitspraak met 10 overwegingen</span>
+            <b data-preview-count></b>
+          </div>
+          <div class="preview-doc" data-preview-doc></div>
+        </div>
+        <label class="check">
+          <input id="autorun" type="checkbox" />
+          <span>
+            <strong>Lees automatisch mee</strong>
+            <em>Met uw rechtsvraag van deze sessie, zodra u zoekresultaten of een uitspraak opent.</em>
+          </span>
+        </label>
+      </section>
+
+      <section class="card privacy">
         <div class="privacy-head">
           <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
           <h2>Uw vraag blijft privé</h2>
@@ -28,46 +172,18 @@
           <li><b>Zero data retention bij het AI-model.</b> Elk verzoek gaat met zero data retention naar het AI-model (via de Vercel AI Gateway): de inhoud wordt niet bewaard en niet gebruikt om modellen te trainen.</li>
           <li><b>In uw browser alleen voor deze sessie.</b> Uw rechtsvraag en de oordelen staan in het geheugen van deze browsersessie en verdwijnen zodra u de browser sluit. Alleen uw weergavekeuzes, zoals inklappen, blijven bewaard.</li>
           <li><b>Privacyverklaring:</b> <a href="https://minuut.eu/leeswijzer/privacy/" target="_blank" rel="noopener">minuut.eu/leeswijzer/privacy</a></li>
-                    <li><b>Wat er naar het AI-model gaat:</b> uw rechtsvraag en de openbare tekst van de uitspraak of inhoudsindicatie. Zet daarom geen cliëntgegevens in uw rechtsvraag.</li>
+          <li><b>Wat er naar het AI-model gaat:</b> uw rechtsvraag en de openbare tekst van de uitspraak of inhoudsindicatie. Zet daarom geen cliëntgegevens in uw rechtsvraag.</li>
         </ul>
-      </section>
-
-      <section class="card">
-        <h2>Zo werkt het</h2>
-        <ol class="steps">
-          <li><span>1</span><div><b>Open een uitspraak.</b> Leeswijzer toont meteen de kernoverwegingen: waar de rechter zelf oordeelt over de inhoud en waar de beslissing op rust. De rest wordt verborgen; met één klik haalt u die terug. Met <kbd>j</kbd> en <kbd>k</kbd> springt u naar de volgende of vorige.</div></li>
-          <li><span>2</span><div><b>Stel eventueel een rechtsvraag</b> in het paneel rechts. Dan ziet u in elke uitspraak wat over uw vraag gaat.</div></li>
-          <li><span>3</span><div><b>Zoek zoals altijd.</b> Met een rechtsvraag beoordeelt Leeswijzer op Rechtspraak.nl de eerste 50 zoekresultaten en zet er ja, deels of nee bij. De beste opent u in één keer.</div></li>
-        </ol>
-        <table class="legend">
-          <tr><td><span class="sw cat-kader"></span>Juridisch kader</td><td>de regel of maatstaf die de rechter hanteert</td></tr>
-          <tr><td><span class="sw cat-toepassing"></span>Toepassing juridisch kader</td><td>de rechter past die maatstaf toe op deze zaak</td></tr>
-          <tr><td><span class="sw cat-obiter"></span>Obiter dictum</td><td>ten overvloede, niet nodig voor de beslissing</td></tr>
-          <tr><td><span class="sw cat-stellingen"></span>Stellingen partijen</td><td>wat partijen stellen, vorderen of betwisten</td></tr>
-          <tr><td><span class="sw cat-feiten"></span>Feiten</td><td>vaststaande feiten en voorgeschiedenis</td></tr>
-          <tr><td><span class="sw cat-proces"></span>Procesverloop</td><td>stukken, zittingen, ontvankelijkheid, kosten</td></tr>
-          <tr><td><span class="sw cat-beslissing"></span>Beslissing</td><td>het dictum</td></tr>
-        </table>
         <p class="note">Het AI-model schrijft niets: u leest altijd de tekst van de rechter. Het beoordeelt en kan zich vergissen; controleer wat u gebruikt.</p>
       </section>
 
-      <section class="card">
-        <h2>Instelling</h2>
-        <label class="check">
-          <input id="autorun" type="checkbox" />
-          <span>
-            <strong>Lees automatisch mee</strong>
-            <em>Met uw rechtsvraag van deze sessie, zodra u zoekresultaten of een uitspraak opent.</em>
-          </span>
-        </label>
-        <fieldset class="strictness">
-          <legend><strong>Hoe streng</strong><em>Bepaalt vanaf wanneer een overweging of zoekresultaat als relevant telt.</em></legend>
-          <div class="seg" role="radiogroup">
-            <label><input type="radio" name="strictness" value="meer" /><span>Meer zien</span></label>
-            <label><input type="radio" name="strictness" value="standaard" /><span>Standaard</span></label>
-            <label><input type="radio" name="strictness" value="minder" /><span>Minder zien</span></label>
-          </div>
-        </fieldset>
+      <section class="card tour-card">
+        <h2>Rondleiding</h2>
+        <p class="card-lede">Zien hoe het werkt? De rondleiding wijst in het Haviltex-arrest aan wat het paneel doet: kernoverwegingen, categorieën, de rechtsvraag en de sneltoetsen <kbd>j</kbd> en <kbd>k</kbd>. Opent in een nieuw tabblad.</p>
+        <div class="tour-actions">
+          <button type="button" class="secondary" id="tour-again">Rondleiding opnieuw bekijken</button>
+          <a class="link" href="options.html?welkom">Introductie opnieuw doorlopen</a>
+        </div>
       </section>
 
       <a class="ad" href="https://minuut.eu/?ref=leeswijzer" target="_blank" rel="noopener">

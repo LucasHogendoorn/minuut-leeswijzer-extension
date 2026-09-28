@@ -101,7 +101,11 @@ MNT.storage = {
 MNT.session = {
   get: (keys) => chrome.storage.session.get(keys),
   set: (obj) => chrome.storage.session.set(obj),
+  remove: (keys) => chrome.storage.session.remove(keys),
 };
+// The welcome page (and "Rondleiding opnieuw bekijken") set this one-shot
+// flag before opening the example ruling; content.js consumes it there.
+MNT.TOUR_KEY = "tour";
 
 MNT.h = (html) => {
   const t = document.createElement("template");

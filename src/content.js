@@ -50,6 +50,7 @@
     hitTarget: HIT_BATCH,
     hitRun: 0,
     emptyTicks: 0,
+    tourPending: false,
   };
 
   // Tabs opened in the background (e.g. "Top 25") start reading only when the
@@ -117,6 +118,14 @@
     // With the panel open, every ruling summarises its core by itself; a closed
     // panel means the extension is off and the page stays untouched.
     if (S.open && ctx.autoRun && segments.length) whenVisible(runRuling);
+    // Opened from the welcome page: start the guided tour on this ruling,
+    // once. The tour needs the panel open and reading.
+    if (ctx.tourPending && segments.length) {
+      ctx.tourPending = false;
+      if (!S.open) panel.on.setOpen(true);
+      else if (!ctx.autoRun) runRuling();
+      setTimeout(() => tour.start(), 700);
+    }
   }
 
   // How a segment shows: tinted and labelled, or folded / hidden when it does
@@ -643,7 +652,9 @@
   // MNT.releaseToAnnounce (src/whatsnew.js).
   let releaseChecked = false;
   function announceRelease() {
-    if (releaseChecked || !S.open) return;
+    // Not on a tour page: the card waits for the next ruling (seenVersion is
+    // only written when it is shown).
+    if (releaseChecked || !S.open || ctx.tourPage) return;
     releaseChecked = true;
     whenVisible(async () => {
       const version = await MNT.releaseToAnnounce().catch(() => null);
@@ -652,6 +663,7 @@
       setTimeout(() => MNT.showWhatsNew(panel, { version, site: site.id }), 700);
     });
   }
+  const tour = new MNT.Tour({ S, panel, jump });
 
   // j / k: next / previous kernoverweging, like a reader's shortcut.
   document.addEventListener("keydown", (e) => {
@@ -707,7 +719,7 @@
 
   (async () => {
     const saved = await MNT.storage.get(["panelOpen", "sort", "lowMode", "autoRun", "defaults", "strictness"]);
-    const session = await MNT.session.get(["question", "recent"]).catch(() => ({}));
+    const session = await MNT.session.get(["question", "recent", MNT.TOUR_KEY]).catch(() => ({}));
     S.open = saved.panelOpen !== false;
     S.question = session.question ?? "";
     S.recent = session.recent ?? [];
@@ -716,6 +728,15 @@
     S.lowMode = S.defaults.lowMode;
     ctx.autoRun = saved.autoRun !== false;
     MNT.setStrictness(saved.strictness);
+    // One-shot: the welcome page flags the example ruling it is about to
+    // open; only that tab, only once, runs the tour.
+    const flag = session[MNT.TOUR_KEY];
+    const ecli = (new URLSearchParams(location.search).get("id") || "").toUpperCase();
+    if (flag && ecli && flag.ecli === ecli) {
+      ctx.tourPending = true;
+      ctx.tourPage = true;
+      MNT.session.remove(MNT.TOUR_KEY).catch(() => {});
+    }
     // The strip the page frees for the panel takes the site's own background.
     const pageBg = getComputedStyle(document.querySelector("main") ?? document.body).backgroundColor;
     if (pageBg && pageBg !== "rgba(0, 0, 0, 0)") document.documentElement.style.setProperty("--mnt-page-bg", pageBg);

@@ -1,0 +1,258 @@
+/* Minuut Leeswijzer: the guided tour (src/tour.js), in its own shadow root
+   above the panel. Four shades leave a hole around the target; a ring marks
+   it; a card beside it explains. Tokens inherit from tokens.css on :root. */
+
+:host {
+  all: initial;
+}
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+button {
+  font: inherit;
+  color: inherit;
+}
+[hidden] {
+  display: none !important;
+}
+
+.tour {
+  font-family: var(--mnt-font-sans);
+  font-size: var(--mnt-text-base);
+  line-height: var(--mnt-leading-snug);
+  color: var(--mnt-text);
+  -webkit-font-smoothing: antialiased;
+  opacity: 0;
+  transition: opacity var(--mnt-duration-medium) var(--mnt-ease-in-out);
+}
+.tour[data-ready="true"] {
+  opacity: 1;
+}
+.tour.is-leaving {
+  opacity: 0;
+  transition: opacity var(--mnt-duration-fast) var(--mnt-ease-in-out);
+}
+
+/* Shades block clicks on everything but the target. */
+.shade {
+  position: fixed;
+  background: rgb(24 43 36 / 0.42);
+  pointer-events: auto;
+}
+.spot {
+  position: fixed;
+  border-radius: var(--mnt-radius-md);
+  box-shadow:
+    0 0 0 2px var(--mnt-surface),
+    0 0 0 4px var(--mnt-accent);
+  pointer-events: none;
+}
+
+/* ---- The card ---------------------------------------------------------- */
+
+.card {
+  outline: none;
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 344px;
+  padding: 16px 18px 14px;
+  border: 1px solid var(--mnt-line);
+  border-radius: var(--mnt-radius-lg);
+  background: var(--mnt-surface);
+  box-shadow: var(--mnt-shadow-float);
+  pointer-events: auto;
+  will-change: transform;
+}
+.card.is-in .card-top,
+.card.is-in .title,
+.card.is-in .body,
+.card.is-in .wait,
+.card.is-in .action,
+.card.is-in .hint,
+.card.is-in .foot {
+  animation: t-reveal var(--mnt-duration-slow) var(--mnt-ease-in-out) both;
+}
+.card.is-in .title { animation-delay: calc(var(--mnt-duration-stagger) * 1); }
+.card.is-in .body { animation-delay: calc(var(--mnt-duration-stagger) * 2); }
+.card.is-in .wait,
+.card.is-in .action,
+.card.is-in .hint { animation-delay: calc(var(--mnt-duration-stagger) * 3); }
+.card.is-in .foot { animation-delay: calc(var(--mnt-duration-stagger) * 4); }
+@keyframes t-reveal {
+  from { opacity: 0; transform: translateY(var(--mnt-distance-base)); filter: blur(var(--mnt-blur-small)); }
+}
+
+.card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.dots {
+  display: flex;
+  gap: 5px;
+}
+.dots i {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mnt-line-strong);
+  transition: background-color var(--mnt-duration-fast) var(--mnt-ease-in-out), transform var(--mnt-duration-fast) var(--mnt-ease);
+}
+.dots i.past { background: var(--mnt-underline); }
+.dots i.on { background: var(--mnt-accent); transform: scale(1.25); }
+.count {
+  font-size: var(--mnt-text-xs);
+  color: var(--mnt-faint);
+  font-variant-numeric: tabular-nums;
+}
+.title {
+  margin: 0 0 6px;
+  font-family: var(--mnt-font-serif);
+  font-size: var(--mnt-text-lg);
+  font-weight: 600;
+  line-height: var(--mnt-leading-tight);
+  letter-spacing: -0.01em;
+}
+.body p {
+  margin: 0;
+  color: var(--mnt-muted);
+  line-height: var(--mnt-leading-body);
+}
+.body kbd {
+  padding: 0 5px;
+  border: 1px solid var(--mnt-line-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font-family: var(--mnt-font-sans);
+  font-size: 11px;
+  color: var(--mnt-text);
+  background: var(--mnt-surface);
+}
+.end-mascot {
+  display: flex;
+  justify-content: center;
+  margin: 2px 0 12px;
+}
+.tour[data-end="true"] .card { text-align: center; }
+.tour[data-end="true"] .card-top { justify-content: center; }
+.tour[data-end="true"] .count { display: none; }
+
+/* Waiting for the model: a breathing dot and a line of text. */
+.wait {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: var(--mnt-radius-sm);
+  background: var(--mnt-sidebar);
+  font-size: var(--mnt-text-sm);
+  color: var(--mnt-muted);
+}
+.wait-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--mnt-accent);
+  animation: breathe 1.2s var(--mnt-ease-in-out) infinite;
+}
+@keyframes breathe {
+  50% { opacity: 0.3; }
+}
+
+.action { margin-top: 12px; }
+.secondary {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--mnt-line-strong);
+  border-radius: var(--mnt-radius-md);
+  background: var(--mnt-surface);
+  font-size: var(--mnt-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--mnt-duration-quick) var(--mnt-ease), transform var(--mnt-duration-quick) var(--mnt-ease);
+}
+.secondary:hover { background: var(--mnt-fill); }
+.secondary:active { transform: scale(var(--mnt-scale-medium)); }
+
+.hint {
+  margin: 10px 0 0;
+  font-size: var(--mnt-text-xs);
+  color: var(--mnt-faint);
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--mnt-line);
+}
+.tour[data-end="true"] .foot { justify-content: center; }
+.btns {
+  display: flex;
+  gap: 8px;
+}
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: var(--mnt-text-sm);
+  color: var(--mnt-faint);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.link:hover { color: var(--mnt-text); }
+.ghost,
+.primary {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--mnt-radius-md);
+  font-size: var(--mnt-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--mnt-duration-quick) var(--mnt-ease), transform var(--mnt-duration-quick) var(--mnt-ease), opacity var(--mnt-duration-quick) var(--mnt-ease);
+}
+.ghost {
+  border: 1px solid var(--mnt-line-strong);
+  background: var(--mnt-surface);
+}
+.ghost:hover { background: var(--mnt-fill); }
+.primary {
+  border: 0;
+  background: var(--mnt-accent);
+  color: var(--mnt-on-accent);
+}
+.primary:hover:not(:disabled) { background: var(--mnt-accent-hover); }
+.primary:active:not(:disabled),
+.ghost:active { transform: scale(var(--mnt-scale-medium)); }
+.primary:disabled { opacity: 0.45; cursor: default; }
+:focus-visible {
+  outline: 2px solid var(--mnt-focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour,
+  .dots i,
+  .secondary,
+  .ghost,
+  .primary { transition: none !important; }
+  .card.is-in * { animation: none !important; }
+  .wait-dot { animation: none !important; }
+}
