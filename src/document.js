@@ -173,13 +173,24 @@ MNT.markSentences = (seg, picks) => {
     const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     walker.currentNode = startNode;
     const slices = [];
-    let node = startNode;
-    while (node) {
-      const from = node === startNode ? startOff : 0;
-      const to = node === endNode ? endOff + 1 : node.textContent.length;
-      if (to > from) slices.push([node, from, to]);
-      if (node === endNode) break;
-      node = walker.nextNode();
+    if (MNT.site.footnotes) {
+      // EU pages: follow the matched characters, so a footnote marker left out
+      // of the index (its "(", its link and its ")") is left out of the mark.
+      let cur = null;
+      for (let k = i; k < i + needle.length; k++) {
+        const [node, off] = at[k];
+        if (cur && cur[0] === node && /^\s*$/.test(node.textContent.slice(cur[2], off))) cur[2] = off + 1;
+        else slices.push((cur = [node, off, off + 1]));
+      }
+    } else {
+      let node = startNode;
+      while (node) {
+        const from = node === startNode ? startOff : 0;
+        const to = node === endNode ? endOff + 1 : node.textContent.length;
+        if (to > from) slices.push([node, from, to]);
+        if (node === endNode) break;
+        node = walker.nextNode();
+      }
     }
     slices.forEach(([n, from, to], k) => {
       const range = document.createRange();

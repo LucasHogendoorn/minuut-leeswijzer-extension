@@ -23,8 +23,9 @@ const isEurlexCaseLaw = () => {
 // Other languages (FR, DE, ...) get the English templates: the model reads the
 // text in its own language either way, and only NL and EN were tuned.
 const euLang = (meta) => (/^nl$/i.test(meta?.lang ?? "") ? "nl" : "en");
-// Footnote markers in opinions: "(20)", on Curia rendered as "( 20 )".
-const EU_FOOTNOTES = /(?<=\s)\(\s*\d{1,3}\s*\)/g;
+// Footnote markers in opinions: "( 20 )" on Curia, " (20)" on EUR-Lex; not
+// the "(1)" of "Article 6(1)".
+const EU_FOOTNOTES = /\(\s+\d{1,3}\s+\)|(?<=\s)\(\d{1,3}\)/g;
 
 const SITES = {
   rechtspraak: {
