@@ -39,10 +39,17 @@
 const TIME_ZONE = "Europe/Amsterdam";
 const FLUSH_MS = 10_000; // at most one storage write per 10 s
 const KEEP_DAYS = 90;
-const MAX_KEYS_PER_DAY = 200; // bounds a day row if someone sends junk versions
+// Bounds a day row: only the per-version counters (ping:*, install:*) can
+// grow with client input, so only they are capped; the operational counters
+// (judge, cache, jev, refused, ...) are a fixed set and always kept.
+const MAX_KEYS_PER_DAY = 200;
+const capped = (key) => key.startsWith("ping:") || key.startsWith("install:");
 const KEY = /^[a-z_]{1,16}:[a-z0-9_.]{1,24}$/;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const ROW = "day:"; // storage key prefix: "day:2026-09-28"
+// The day's number of Jev calls, for the global daily cap: its own key
+// ("jev:2026-09-28"), written by the global Limiter, never capped or merged.
+export const JEV = "jev:";
 
 const dayFormat = new Intl.DateTimeFormat("en-CA", { timeZone: TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" });
 export const today = (date = new Date()) => dayFormat.format(date); // "2026-09-28"
@@ -75,9 +82,12 @@ export function restore(deltas) {
   }
 }
 
-// Only a real release version is kept ("1.1.0", "1.12.3"); anything else,
-// including development builds and junk, counts as "other" (review 1, finding 8).
-export const versionLabel = (v) => (typeof v === "string" && /^1\.\d{1,2}\.\d{1,2}$/.test(v) ? v : "other");
+// Only versions that were actually shipped are kept; anything else, including
+// development builds and junk, counts as "other" (review 1, finding 8), so
+// made-up versions cannot fill a day's row. At a release, add the new version
+// here and deploy the Worker before the extension (CONTRIBUTING.md).
+export const VERSIONS = new Set(["1.0.0", "1.0.1", "1.1.0"]);
+export const versionLabel = (v) => (typeof v === "string" && VERSIONS.has(v) ? v : "other");
 
 // ---- In the global Limiter Durable Object -----------------------------------------------
 
@@ -120,7 +130,7 @@ export class DailyCounters {
     for (const [day, counts] of Object.entries(this.mem)) {
       const row = kv.get(ROW + day) ?? {};
       for (const [key, n] of Object.entries(counts)) {
-        const k = Object.hasOwn(row, key) || Object.keys(row).length < MAX_KEYS_PER_DAY ? key : "other:overflow";
+        const k = !capped(key) || Object.hasOwn(row, key) || Object.keys(row).length < MAX_KEYS_PER_DAY ? key : "other:overflow";
         row[k] = (row[k] ?? 0) + n;
       }
       kv.put(ROW + day, row);
@@ -131,7 +141,8 @@ export class DailyCounters {
     const now = today();
     if (this.prunedOn !== now) {
       this.prunedOn = now;
-      const old = [...kv.list({ prefix: ROW, end: ROW + daysBefore(now, KEEP_DAYS) })].map(([key]) => key);
+      const cutoff = daysBefore(now, KEEP_DAYS);
+      const old = [ROW, JEV].flatMap((prefix) => [...kv.list({ prefix, end: prefix + cutoff })].map(([key]) => key));
       for (const key of old) kv.delete(key);
     }
   }

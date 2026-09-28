@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { DailyCounters, count, drain, restore, statsResponse, today, versionLabel } from "./stats.js";
+import { DailyCounters, JEV, count, drain, restore, statsResponse, today, versionLabel } from "./stats.js";
 import { answerKey, readAnswers, storable, templateId, writeAnswer } from "./cache.js";
 import { LEASE_MAX, Leases, RefusedClients, TokenBuckets, Windows, clientNet, hashKey, readLimited } from "./limits.js";
 
@@ -596,9 +596,15 @@ export class Limiter extends DurableObject {
     if (counts) this.counters.add(counts);
     const now = Math.floor(Date.now() / 1000);
     const day = today();
-    if (this.day?.day !== day) this.day = { day, calls: this.counters.read(1)[0]?.counters["jev:calls"] ?? 0 };
-    else if (counts?.[day]?.["jev:calls"]) this.day.calls += counts[day]["jev:calls"];
+    const kv = this.ctx.storage.kv;
+    // The day's total lives under its own key (not in the capped counter row),
+    // so junk counters can never hide it from the daily cap.
+    if (this.day?.day !== day) this.day = { day, calls: kv.get(JEV + day) ?? 0 };
     const n = Number.isInteger(calls) && calls > 0 ? Math.min(calls, 1_000_000) : 0;
+    if (n) {
+      this.day.calls += n;
+      kv.put(JEV + day, this.day.calls);
+    }
     if (n) this.minute.set(now, (this.minute.get(now) ?? 0) + n);
     let perMinute = 0;
     for (const [sec, c] of this.minute) {

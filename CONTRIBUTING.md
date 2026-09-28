@@ -175,6 +175,12 @@ Zonder Gateway-sleutel kan `wrangler dev` een lokale nep-gateway gebruiken:
   oordelen over openbare tekst en anonieme dagtellers zonder vraag, tekst, IP-adres of ID.
 - De opmaak van Rechtspraak.nl, Curia en EUR-Lex zelf blijft zoveel mogelijk ongemoeid.
 
+## Een nieuwe versie uitbrengen
+
+De dagtellers kennen alleen versies die echt zijn uitgebracht (`VERSIONS` in
+`worker/src/stats.js`); een andere versie telt als `other`. Voeg bij een release het nieuwe
+versienummer daar toe en deploy de Worker vóór de extensie in de store komt.
+
 ## Pakket bouwen
 
 `./scripts/build.sh` maakt `dist/minuut-leeswijzer-<versie>.zip` en breekt af als er iets
