@@ -426,8 +426,7 @@ function parseJson(text) {
 }
 
 const tooLarge = (origin) => fail(413, "Verzoek is te groot.", "too_large", origin);
-const lengthRequired = (origin) => fail(411, "Content-Length ontbreekt.", "length_required", origin);
-const bodyError = (status, origin) => (status === 411 ? lengthRequired(origin) : tooLarge(origin));
+const bodyError = (status, origin) => (status === 400 ? fail(400, "Ongeldige Content-Length.", "invalid_request", origin) : tooLarge(origin));
 
 // ---- Shared cache: answers about public text only ------------------------------------
 // Only calls without a question are cached: their input is the public ruling text

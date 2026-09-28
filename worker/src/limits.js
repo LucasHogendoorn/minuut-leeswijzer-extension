@@ -250,15 +250,20 @@ export class Windows {
 }
 
 // ---- Request bodies ------------------------------------------------------------------------
-// A POST must declare its length (411 otherwise) and may not declare more than
-// `max` (413). The body is then read as a stream with a byte counter that
-// stops at `max`, so an understated Content-Length cannot make the Worker
-// buffer more than that (review 1, finding 5).
-// Returns { text } or { status } (411 or 413).
+// A declared Content-Length above `max` is refused at once (413). The body is
+// then read as a stream with a byte counter that stops at `max`, so a missing
+// or understated Content-Length cannot make the Worker buffer more than that
+// (review 1, finding 5). A missing Content-Length is accepted: the stream cap
+// already bounds memory, and whether Cloudflare's edge always passes the
+// header on for HTTP/2 and HTTP/3 requests is not verified. A malformed one is
+// refused (400).
+// Returns { text } or { status } (400 or 413).
 export async function readLimited(request, max) {
   const header = request.headers.get("Content-Length");
-  if (header === null || !/^\d{1,12}$/.test(header.trim())) return { status: 411 };
-  if (Number(header) > max) return { status: 413 };
+  if (header !== null) {
+    if (!/^\d{1,12}$/.test(header.trim())) return { status: 400 };
+    if (Number(header) > max) return { status: 413 };
+  }
   if (!request.body) return { text: "" };
   const reader = request.body.getReader();
   const chunks = [];
