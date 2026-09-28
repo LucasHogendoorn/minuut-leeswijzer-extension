@@ -1,7 +1,7 @@
 // Anonymous daily counters: how many installs are active, how many rulings are
 // judged, how often the cache helps, how often Jev or the rate limits refuse.
 //
-// What a counter is: a fixed name ("judge:core", "cache:hit", "ping:1.1.0")
+// What a counter is: a fixed name ("judge:core", "lookup:hit", "ping:1.1.0")
 // and a number per calendar day (Europe/Amsterdam). Nothing else is kept: no
 // question, no ruling text, no ECLI, no URL, no IP or hash of one, no install
 // or random ID. A counter cannot say who did something or what they read.
@@ -13,27 +13,28 @@
 // is one request) and, for SQLite storage, 100,000 rows written and 5 million
 // rows read per day, 5 GB stored; each setAlarm() is billed as one row written.
 // Workers KV allows only 1,000 writes/day, so counters stay out of KV.
-//   - No extra Durable Object requests for judge calls: the counts ride along
-//     on the global Limiter's take() that every call already makes. A Worker
-//     isolate collects counts in memory (`count`) and hands them over on its
-//     next take() (`drain`); what happens after that call (cache hit, upstream
-//     error) is therefore delivered with the isolate's next request.
+//   - No Durable Object request per judge call: a Worker isolate collects
+//     counts in memory (`count`) and hands them over to the global Limiter at
+//     most once per 10 s (REPORT_MS in src/index.js, Limiter.report), together
+//     with its number of Jev calls for the global limit. So what happens in an
+//     isolate reaches the counters within ~10 s, on its next request.
 //   - The global Limiter writes them to its storage, batched: when counts
 //     arrive and the last write is FLUSH_MS or longer ago it writes at once,
 //     otherwise an alarm writes them FLUSH_MS after the last write. One write
 //     is one row per day touched. The window is short on purpose: counts wait
 //     in memory, and an idle Durable Object is evicted after 70-140 s in
 //     production (https://developers.cloudflare.com/durable-objects/concepts/durable-object-lifecycle/)
-//     but after about 10 s in local `wrangler dev` (measured). Worst case, under
-//     nonstop traffic: 17,280 writes + 17,280 setAlarm rows = ~35,000 rows
-//     written/day (of 100,000) and 17,280 alarm invocations/day (of 100,000
-//     requests). Realistically: about one write per burst of use.
+//     but after about 10 s in local `wrangler dev` (measured). With one busy
+//     isolate reports come 10 s apart and are written at once, without an
+//     alarm. Worst case, many isolates reporting nonstop: 8,640 writes + 8,640
+//     setAlarm rows = ~17,000 rows written/day (of 100,000) and 8,640 alarm
+//     invocations/day (of 100,000 requests).
 //   - One row per day, kept for 90 days.
 // Known undercount, accepted for basic observability: counts still held by a
 // Worker isolate that is then shut down without another request are lost.
 
 const TIME_ZONE = "Europe/Amsterdam";
-const FLUSH_MS = 5_000; // at most one storage write per 5 s
+const FLUSH_MS = 10_000; // at most one storage write per 10 s
 const KEEP_DAYS = 90;
 const MAX_KEYS_PER_DAY = 200; // bounds a day row if someone sends junk versions
 const KEY = /^[a-z_]{1,16}:[a-z0-9_.]{1,24}$/;
@@ -63,8 +64,17 @@ export function drain() {
   return out;
 }
 
-// Only a plain version number is kept; anything else counts as "other".
-export const versionLabel = (v) => (typeof v === "string" && /^\d{1,4}(\.\d{1,4}){0,3}$/.test(v) ? v : "other");
+// Puts back counts that could not be handed over (the report failed).
+export function restore(deltas) {
+  for (const [day, counts] of Object.entries(deltas ?? {})) {
+    const row = (pending[day] ??= {});
+    for (const [key, n] of Object.entries(counts)) row[key] = (row[key] ?? 0) + n;
+  }
+}
+
+// Only a real release version is kept ("1.1.0", "1.12.3"); anything else,
+// including development builds and junk, counts as "other" (review 1, finding 8).
+export const versionLabel = (v) => (typeof v === "string" && /^1\.\d{1,2}\.\d{1,2}$/.test(v) ? v : "other");
 
 // ---- In the global Limiter Durable Object -----------------------------------------------
 
@@ -147,9 +157,10 @@ async function sameToken(given, expected) {
   return crypto.subtle.timingSafeEqual(a, b);
 }
 
-// Returns a Response, or null when the endpoint is switched off (no secret).
+// Returns a Response, or null when the endpoint is switched off (no secret, or
+// a secret shorter than 32 characters: use e.g. `openssl rand -hex 32`).
 export async function statsResponse(request, env, url, stub) {
-  if (!env.STATS_TOKEN) return null;
+  if (!env.STATS_TOKEN || env.STATS_TOKEN.length < 32) return null;
   const headers = { "Content-Type": "application/json", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
   if (request.method !== "GET") return new Response(JSON.stringify({ message: "Alleen GET." }), { status: 405, headers });
   const auth = request.headers.get("Authorization") ?? "";

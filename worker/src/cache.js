@@ -14,9 +14,11 @@
 //   k    first 16 bytes of SHA-256 over exactly what goes to Jev: model, the
 //        built questions (for "sentences" those include the sentences) and the
 //        state. Never the ECLI or anything about the reader. 128 bits: finding
-//        a second text with the same key (to plant Jev's answer for it on
-//        someone else's text) takes ~2^128 work; accidental collisions at 10^9
-//        rows have probability ~1e-21.
+//        a second text with the same key as a given one (to plant Jev's answer
+//        for it on someone else's text) is a second preimage, ~2^128 work;
+//        finding any two texts that collide is a birthday search, ~2^64 work,
+//        and gains nothing (both would be texts the attacker chose). Accidental
+//        collisions at 10^9 rows have probability ~1e-21.
 //   v    one codec byte + deflate-raw of the answers JSON with a fixed preset
 //        dictionary (CODEC_V1). Measured on 25 real cached answers: 259 bytes
 //        of JSON become 48 bytes; a row takes ~87 bytes on disk instead of
@@ -33,11 +35,21 @@
 //     already exists; no read before the write, safe under races.
 //   No hit counters, no timestamps per row: a read never turns into a write,
 //   and a row does not say when anyone read the ruling.
+//
+// Defence in depth: an answer is only written when it has exactly the shape the
+// question set asks for (validAnswers) and its JSON is at most MAX_ANSWER_BYTES;
+// the same check runs on every read, and a row that fails it reads as a miss
+// (and is replaced by the next answer Jev gives for that key). Decompression
+// stops at MAX_INFLATED bytes.
 
 import { deflateRawSync, inflateRawSync } from "node:zlib";
 
 // Keys per statement: D1 allows 100 bound parameters per query, one is tpl.
 const KEYS_PER_STATEMENT = 99;
+// Real answers are 100-800 bytes of JSON (a "sentences" answer with 40 options is
+// the largest); anything bigger is not stored.
+export const MAX_ANSWER_BYTES = 4_096;
+const MAX_INFLATED = 64_000;
 
 // ---- Keys --------------------------------------------------------------------------
 
@@ -76,6 +88,41 @@ const DICTIONARY_V1 = enc.encode(
     '"rol":{"type":"choice","choice":"toepassing","probabilities":{"beslissing":0,"proces":0,"kader":0,"toepassing":0,"feiten":0,"stellingen":0,"obiter":0},"confidence":0.',
 );
 
+// ---- Shape ---------------------------------------------------------------------------
+// `questions` is the question set as built for this call ({ name: { type,
+// criteria } }). An answer is valid when it has exactly those names, and per
+// name: boolean -> { probability: 0..1 }; choice -> { choice: one of the
+// criteria, probabilities: { criterion: 0..1 } }. "type" (when present) must
+// match, "confidence" (when present) must be 0..1; nothing else is allowed.
+const isUnit = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 1;
+const isPlain = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+export function validAnswers(answers, questions) {
+  if (!isPlain(answers) || !isPlain(questions)) return false;
+  const names = Object.keys(questions);
+  const keys = Object.keys(answers);
+  if (keys.length !== names.length || !names.every((n) => Object.hasOwn(answers, n))) return false;
+  for (const name of names) {
+    const q = questions[name];
+    const a = answers[name];
+    if (!isPlain(a)) return false;
+    if (a.type !== undefined && a.type !== q.type) return false;
+    if (a.confidence !== undefined && !isUnit(a.confidence)) return false;
+    if (q.type === "boolean") {
+      if (!isUnit(a.probability) || Object.keys(a).some((k) => !["type", "probability", "confidence"].includes(k))) return false;
+    } else if (q.type === "choice") {
+      const allowed = q.criteria ?? {};
+      if (typeof a.choice !== "string" || !Object.hasOwn(allowed, a.choice)) return false;
+      if (!isPlain(a.probabilities) || !Object.entries(a.probabilities).every(([k, p]) => Object.hasOwn(allowed, k) && isUnit(p))) return false;
+      if (Object.keys(a).some((k) => !["type", "choice", "probabilities", "confidence"].includes(k))) return false;
+    } else return false;
+  }
+  return true;
+}
+
+// Valid and small enough to keep.
+export const storable = (answers, questions) => validAnswers(answers, questions) && enc.encode(JSON.stringify(answers)).length <= MAX_ANSWER_BYTES;
+
 export function encodeAnswers(answers) {
   const packed = deflateRawSync(enc.encode(JSON.stringify(answers)), { level: 9, dictionary: DICTIONARY_V1 });
   const out = new Uint8Array(packed.length + 1);
@@ -89,7 +136,7 @@ export function decodeAnswers(value) {
   try {
     const bytes = value instanceof Uint8Array ? value : Uint8Array.from(value);
     if (bytes[0] !== CODEC_V1) return null;
-    const answers = JSON.parse(new TextDecoder().decode(inflateRawSync(bytes.subarray(1), { dictionary: DICTIONARY_V1 })));
+    const answers = JSON.parse(new TextDecoder().decode(inflateRawSync(bytes.subarray(1), { dictionary: DICTIONARY_V1, maxOutputLength: MAX_INFLATED })));
     return answers && typeof answers === "object" && !Array.isArray(answers) && Object.keys(answers).length ? answers : null;
   } catch {
     return null;
@@ -99,8 +146,10 @@ export function decodeAnswers(value) {
 // ---- Reads -------------------------------------------------------------------------
 
 // Answers for `keys` (all of template `tpl`), in order, null where not cached.
+// `questions[i]` is the question set of key i: a row whose answer does not fit
+// it (or is too big) reads as null, and its index goes into `invalid`.
 // One round trip: at most 99 keys per statement, statements sent as one batch.
-export async function readAnswers(db, tpl, keys) {
+export async function readAnswers(db, tpl, keys, questions, invalid = new Set()) {
   const statements = [];
   for (let start = 0; start < keys.length; start += KEYS_PER_STATEMENT) {
     const chunk = keys.slice(start, start + KEYS_PER_STATEMENT);
@@ -111,7 +160,13 @@ export async function readAnswers(db, tpl, keys) {
   }
   const results = statements.length === 1 ? [await statements[0].all()] : await db.batch(statements);
   const out = new Array(keys.length).fill(null);
-  for (const r of results) for (const row of r.results) out[row.i] = decodeAnswers(row.v);
+  for (const r of results) {
+    for (const row of r.results) {
+      const answers = decodeAnswers(row.v);
+      if (answers && storable(answers, questions[row.i])) out[row.i] = answers;
+      else invalid.add(row.i);
+    }
+  }
   return out;
 }
 
@@ -121,9 +176,14 @@ export async function readAnswers(db, tpl, keys) {
 const registered = new Set();
 
 // Stores one answer. `template` names the fingerprint for the operator; it is
-// written once per template per isolate, in the same batch.
-export async function writeAnswer(db, tpl, key, answers, template, day) {
-  const insert = db.prepare("INSERT INTO answers (tpl, k, v) VALUES (?1, ?2, ?3) ON CONFLICT DO NOTHING").bind(tpl, key, encodeAnswers(answers));
+// written once per template per isolate, in the same batch. The caller checks
+// storable() first. `replace`: the row for this key failed validation on read,
+// so this answer overwrites it (otherwise the first answer written stays).
+export async function writeAnswer(db, tpl, key, answers, template, day, replace = false) {
+  const sql = replace
+    ? "INSERT INTO answers (tpl, k, v) VALUES (?1, ?2, ?3) ON CONFLICT (tpl, k) DO UPDATE SET v = excluded.v"
+    : "INSERT INTO answers (tpl, k, v) VALUES (?1, ?2, ?3) ON CONFLICT DO NOTHING";
+  const insert = db.prepare(sql).bind(tpl, key, encodeAnswers(answers));
   if (registered.has(tpl)) return insert.run();
   await db.batch([
     db

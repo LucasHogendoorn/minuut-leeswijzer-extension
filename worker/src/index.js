@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
-import { DailyCounters, count, drain, statsResponse, today, versionLabel } from "./stats.js";
-import { answerKey, readAnswers, templateId, writeAnswer } from "./cache.js";
+import { DailyCounters, count, drain, restore, statsResponse, today, versionLabel } from "./stats.js";
+import { answerKey, readAnswers, storable, templateId, writeAnswer } from "./cache.js";
+import { LEASE_MAX, Leases, RefusedClients, TokenBuckets, Windows, clientNet, hashKey, readLimited } from "./limits.js";
 
 // Minuut Leeswijzer: Cloudflare Worker in front of Jev (Vercel AI Gateway).
 //
@@ -13,8 +14,10 @@ import { answerKey, readAnswers, templateId, writeAnswer } from "./cache.js";
 //     anything else; EU case law picks a template set per language ("nl" or
 //     "en", a closed field), never free text;
 //   - strict size limits on every field and on the raw body;
-//   - exact per-client rate limits (burst and per minute) plus a global limit
-//     that caps spend if many IPs join in (Durable Objects, memory only);
+//   - per-client rate limits (burst and per minute; exact in Durable Objects,
+//     with free in-isolate checks in front) plus a global limit on Jev calls per
+//     minute and per day that caps spend if many IPs join in (see "Rate
+//     limiting" below and src/limits.js);
 //   - only browser-extension origins, optionally pinned to the store IDs in
 //     env.ALLOWED_ORIGINS.
 //
@@ -43,6 +46,17 @@ const LIMITS = {
   state: 30_000, // the gateway refuses (429) from roughly 30-40k characters
   sentences: 40,
   sentence: 1_500,
+  // A "sentences" call: the r.o.'s sentences are the options of one choice and
+  // `state` is only a header naming the r.o. and the ruling (src/jev.js,
+  // MNT.sentenceState: at most ~700 characters with a 500-character question).
+  // Its text therefore cannot be checked against `state`; instead the header is
+  // kept short and the sentences together may not exceed what one r.o. sends
+  // as `state` in a core or segment call, so a sentences call never carries
+  // more text to Jev than any other call (security review 1, finding 4).
+  sentenceState: 1_000,
+  sentencesTotal: 24_000, // the extension stops adding sentences at 20,000
+  // Everything a call carries to Jev: question + state + sentences.
+  total: 31_000,
   // POST /v1/lookup: cached answers for up to 100 r.o.'s of one ruling at once.
   lookupBody: 512_000, // bytes; hashing and parsing this much stays well under 10 ms CPU
   lookupItems: 100,
@@ -378,13 +392,15 @@ function build(body) {
     return `Rechtsvraag ontbreekt of is langer dan ${LIMITS.question} tekens.`;
   }
   if (court !== undefined && !(typeof court === "string" && COURTS.has(court))) return "Onbekende rechter.";
-  if (!isText(state, LIMITS.state)) return `Tekst ontbreekt of is langer dan ${LIMITS.state} tekens.`;
+  if (!isText(state, kind === "sentences" ? LIMITS.sentenceState : LIMITS.state)) return `Tekst ontbreekt of is te lang.`;
   if (kind === "sentences") {
     if (!Array.isArray(sentences) || sentences.length < 2 || sentences.length > LIMITS.sentences) return "Onverwacht aantal zinnen.";
     if (!sentences.every((s) => isText(s, LIMITS.sentence))) return "Een zin ontbreekt of is te lang.";
+    if (sentences.reduce((n, s) => n + s.length, 0) > LIMITS.sentencesTotal) return "De zinnen zijn samen te lang.";
   } else if (sentences !== undefined) {
     return "Zinnen horen alleen bij soort 'sentences'.";
   }
+  if (question.length + state.length + (sentences ?? []).reduce((n, s) => n + s.length, 0) > LIMITS.total) return "Verzoek is te lang.";
   const q = question.replace(/["\n\r]+/g, " ").trim();
   // EU case law (a `lang`, or an EU speaker from a client that predates `lang`)
   // gets the EU templates in the page's language; the Dutch courts keep theirs.
@@ -399,11 +415,9 @@ function build(body) {
   };
 }
 
-async function readBody(request, max = LIMITS.body) {
-  const declared = Number(request.headers.get("Content-Length") ?? 0);
-  if (declared > max) return null;
-  const text = await request.text();
-  if (text.length > max) return null;
+
+// Parses a request body read with readLimited: the JSON value, or undefined.
+function parseJson(text) {
   try {
     return JSON.parse(text);
   } catch {
@@ -411,14 +425,19 @@ async function readBody(request, max = LIMITS.body) {
   }
 }
 
+const tooLarge = (origin) => fail(413, "Verzoek is te groot.", "too_large", origin);
+const lengthRequired = (origin) => fail(411, "Content-Length ontbreekt.", "length_required", origin);
+const bodyError = (status, origin) => (status === 411 ? lengthRequired(origin) : tooLarge(origin));
+
 // ---- Shared cache: answers about public text only ------------------------------------
 // Only calls without a question are cached: their input is the public ruling text
 // and the Worker's own template, nothing the user typed. The key hashes exactly
 // what goes to Jev (model, built questions, state), so any template change starts
 // a fresh cache by itself. Only answers the Worker got from Jev are written, so a
-// client cannot plant answers for text it did not send. Storage, keys, codec and
-// costs: src/cache.js. A D1 error (for instance the daily quota) is a miss and
-// never fails a call; it is counted as cache:error.
+// client cannot plant answers for text it did not send, and only when they have
+// exactly the shape the questions ask for (src/cache.js, storable). Storage,
+// keys, codec and costs: src/cache.js. A D1 error (for instance the daily quota)
+// is a miss and never fails a call; it is counted as cache:error.
 
 const isCacheable = (env, body) => Boolean(env.DB) && !(body.question ?? "").trim() && (body.kind === "core" || body.kind === "sentences");
 
@@ -435,47 +454,159 @@ async function cacheSlot(built) {
   return { tpl, key, template: { kind: built.template.kind, lang: built.template.lang, court: built.template.court, model: MODEL } };
 }
 
-function storeAnswer(env, ctx, slot, answers) {
-  ctx.waitUntil(writeAnswer(env.DB, slot.tpl, slot.key, answers, slot.template, today()).catch(() => count("cache:error")));
+function storeAnswer(env, ctx, slot, answers, replace) {
+  ctx.waitUntil(writeAnswer(env.DB, slot.tpl, slot.key, answers, slot.template, today(), replace).catch(() => count("cache:error")));
 }
 
-// ---- Rate limiting: exact counters in Durable Objects --------------------------------
-// Cloudflare's rate-limit binding counts per location and approximately (tested:
-// 400 rapid calls, none refused), so the hard caps live in Durable Objects: one
-// per client (keyed by a salted hash of the IP, never the IP itself) and one
-// global. Counters are in memory only, bucketed per second; nothing is stored.
-// The global object also receives the anonymous daily counts (src/stats.js)
-// with the take() it already gets, and is the only one that writes them.
-
-const PER_CLIENT = [
+// ---- Rate limiting ---------------------------------------------------------------------
+// Layers, cheapest first; a request only reaches a Durable Object after all the
+// free checks passed (path, method, Origin, Content-Type, Content-Length, body
+// size, JSON and fields):
+//   1. negative cache (src/limits.js, RefusedClients): a client key the
+//      Durable Object refused gets its 429 from isolate memory until its
+//      Retry-After is over. No Durable Object request.
+//   2. token bucket per client key per isolate (TokenBuckets): the same budget
+//      as the Durable Object's judge limit, approximate. Stops a flood inside one
+//      isolate. No Durable Object request.
+//   3. the exact per-client limit in a Durable Object (Limiter.take), one
+//      object per client key. A judge call may get a small lease of extra
+//      tokens (Leases) for the same client's next calls in this isolate.
+//   4. the global limit: no longer a Durable Object call per request. Each
+//      isolate reports its anonymous counts and its number of Jev calls to the
+//      global object at most once per REPORT_MS (Limiter.report); the answer
+//      says whether Jev calls must pause (over GLOBAL). Approximate by up to
+//      REPORT_MS per isolate, which is fine for a spend cap.
+// Cloudflare's rate-limit binding is not used: its docs do not say it exists on
+// the Free plan, it counts per location and "eventually consistent, and
+// intentionally designed to not be used as an accurate accounting system"
+// (https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/),
+// an earlier test here refused none of 400 rapid calls, and the zone's WAF
+// rate-limiting rule on leeswijzer-api.minuut.eu (CONTRIBUTING.md) already
+// drops per-IP floods before the Worker runs.
+//
+// Clients: one IPv4 address, or one IPv6 /64 (/48 for the daily ping), hashed
+// with RL_SALT (src/limits.js, clientNet). An office behind one NAT address is
+// one client, so the limits leave room for several heavy readers at once.
+//
+// Sizing, measured 2026-09-28 with the 1.1 extension in Chrome for Testing
+// against `wrangler dev` and a mock Jev answering in 300-500 ms (real Jev read
+// 101 punten in 8.4 s, the mock in ~9.5 s), through a logging proxy:
+//   EUR-Lex CELEX:62012CJ0131, 101 punten, cold, scrolled to the end:
+//     lookups of 100 + 1 items, then 101 core + 28 sentences judge calls;
+//     judge calls: at most 122 in any 10 s, 129 in any 60 s.
+//   The same ruling warm (all in the shared cache): lookups of 100 + 1 + 28
+//     items within a second, no judge call.
+//   Haviltex (14 r.o.'s) cold: 14 items and 17 judge calls; with a question: 20.
+//   "Open de beste 25" from 50 search results with a question, first five
+//     tabs viewed: 50 ruling calls for the list, then 18 ruling + 359 segment +
+//     91 sentences calls: at most 151 judge calls in any 10 s and 518 in any
+//     60 s. This is an upper bound: the test browser (Playwright) reports every
+//     tab as visible, so all 25 tabs read at once; in Chrome, background tabs
+//     wait until they are viewed.
+// CALLS allows about twice the worst 10 s and 1.7 times the worst minute of
+// that upper bound for one reader, so two or three lawyers behind one office
+// address can each open a cold 101-punt ruling in the same minute without a
+// 429. Lower than before (1,200/min), and lookups have their own budget
+// (ITEMS), so reading from the cache no longer eats into the Jev budget.
+// What one client can still do: 900 Jev calls/min, so a single address at the
+// cap could use up the Free plan's 100,000 Workers requests in about 111
+// minutes; the zone WAF rule and the global daily cap are the backstops, and
+// only Workers Paid removes the class (review 1, "Structural").
+//
+// Durable Object requests (Free plan: 100,000/day; every RPC call is one),
+// counted in `wrangler dev` for the cold EUR-Lex ruling above (131 API calls):
+//   before: 269 (2 per judge or lookup call: client take + global take, also
+//     when refused; 2 per ping; stats alarms up to 17,280/day). Warm: 11.
+//   now: 18 (14 client takes, thanks to leases; 2 global reports; 2 pings).
+//     Warm: 6. A refused flood: 3,000 calls from one address cost 35 (before:
+//     6,000). Per call at most 1 (client take), 0 when refused from memory;
+//     plus 1 report per isolate per 10 s while there is something to report,
+//     plus at most 8,640 stats alarms/day (FLUSH_MS in src/stats.js).
+// So on the Free plan the Workers requests (100,000/day, ~140 per cold
+// 101-punt ruling including preflights) bind before Durable Objects do.
+const CALLS = [
   { limit: 300, ms: 10_000 },
-  { limit: 1_200, ms: 60_000 },
+  { limit: 900, ms: 60_000 },
 ];
-const GLOBAL = [{ limit: 12_000, ms: 60_000 }];
-// The daily ping: one per install per day, so a tight per-client cap.
-const PING_CLIENT = [{ limit: 10, ms: 3_600_000 }];
+// Lookup items (D1 reads, never Jev): a warm 101-punt ruling looks up 101 core
+// items and then up to one sentences item per relevant punt, ~200 at once.
+const ITEMS = [
+  { limit: 600, ms: 10_000 },
+  { limit: 1_800, ms: 60_000 },
+];
+// Extension 1.0.x calls the workers.dev host with /v1/judge only (no lookup,
+// no ping, Rechtspraak.nl only; a cold 101-r.o. ruling is ~115 calls in 10 s).
+// Tighter, and gone when workers_dev is switched off (CONTRIBUTING.md).
+const LEGACY_CALLS = [
+  { limit: 200, ms: 10_000 },
+  { limit: 600, ms: 60_000 },
+];
+// The isolate's token bucket for API requests of one client key: the same
+// budget as CALLS (300 at once, 900/min), so it never refuses what the
+// Durable Object would allow.
+const buckets = new TokenBuckets({ capacity: 300, perSecond: 15 });
+const refused = new RefusedClients();
+const leases = new Leases();
+
+// Jev calls for everyone together, the spend cap. On the Free plan the daily
+// cap sits just below the 100,000 Workers requests a day (each Jev call is one
+// request, plus lookups, preflights and pings); on Workers Paid it is the
+// ceiling that stops a runaway bill.
+// 3,000/min is ~23 cold 101-punt rulings starting in the same minute (129 calls
+// each); 80,000/day is ~600 of them, or ~4,000 Rechtspraak rulings read with a
+// question at ~20 calls each. Before: 12,000/min and no daily cap.
+const GLOBAL = { perMinute: 3_000, perDay: 80_000 };
+const REPORT_MS = 10_000;
+
+// The daily ping per /48 (or IPv4 address) per Amsterdam day: one "active"
+// and three "install". The day is kept in the ping Limiter's storage, so an
+// evicted object does not forget it. An office behind one address is therefore
+// counted as one active network per day, not per install.
+const PING = { active: 1, install: 3 };
 
 export class Limiter extends DurableObject {
-  buckets = new Map(); // second -> count
+  windows = new Windows();
+  minute = new Map(); // global object: second -> Jev calls
+  day = null; // global object: { day, calls }
 
   constructor(ctx, env) {
     super(ctx, env);
     this.counters = new DailyCounters(ctx);
   }
 
-  // `counts`: anonymous daily counts a Worker hands over (global object only).
-  // `weight`: how many calls this request stands for (a lookup of n r.o.'s).
-  take(windows, counts, weight = 1) {
+  // Per client. `weight`: how many tokens this request needs; `extra`: a lease
+  // for the client's next judge calls, granted as far as there is room.
+  // Returns { granted, retryAfter }.
+  take(windows, weight = 1, extra = 0) {
+    return this.windows.take(windows, weight, Math.min(extra, LEASE_MAX));
+  }
+
+  // Global object only: the anonymous daily counts and the number of Jev calls
+  // an isolate made since its last report. Returns { shed } (pause Jev calls).
+  report(counts, calls = 0) {
     if (counts) this.counters.add(counts);
     const now = Math.floor(Date.now() / 1000);
-    const horizon = Math.max(...windows.map((w) => w.ms)) / 1000;
-    for (const sec of this.buckets.keys()) if (sec <= now - horizon) this.buckets.delete(sec);
-    for (const w of windows) {
-      let n = 0;
-      for (const [sec, count] of this.buckets) if (sec > now - w.ms / 1000) n += count;
-      if (n + weight > w.limit) return false;
+    const day = today();
+    if (this.day?.day !== day) this.day = { day, calls: this.counters.read(1)[0]?.counters["jev:calls"] ?? 0 };
+    else if (counts?.[day]?.["jev:calls"]) this.day.calls += counts[day]["jev:calls"];
+    const n = Number.isInteger(calls) && calls > 0 ? Math.min(calls, 1_000_000) : 0;
+    if (n) this.minute.set(now, (this.minute.get(now) ?? 0) + n);
+    let perMinute = 0;
+    for (const [sec, c] of this.minute) {
+      if (sec <= now - 60) this.minute.delete(sec);
+      else perMinute += c;
     }
-    this.buckets.set(now, (this.buckets.get(now) ?? 0) + weight);
+    return { shed: perMinute > GLOBAL.perMinute || this.day.calls >= GLOBAL.perDay };
+  }
+
+  // Ping object only (one per /48): may this ping be counted today?
+  ping(event, day) {
+    const kv = this.ctx.storage.kv;
+    const seen = kv.get("ping");
+    const row = seen?.day === day ? seen : { day, active: 0, install: 0 };
+    if (!Object.hasOwn(PING, event) || row[event] >= PING[event]) return false;
+    row[event]++;
+    kv.put("ping", row);
     return true;
   }
 
@@ -489,48 +620,121 @@ export class Limiter extends DurableObject {
   }
 }
 
-async function clientKey(ip, salt) {
-  const bytes = new TextEncoder().encode(`${salt}|${ip}`);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(digest).slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 const globalLimiter = (env) => env.LIMITER.get(env.LIMITER.idFromName("global"));
+const clientKey = (request, env, prefix = 64) => hashKey(clientNet(request.headers.get("CF-Connecting-IP") ?? "unknown", prefix), env.RL_SALT ?? "");
 
-// `weight` counts against the client's limits: a lookup of n r.o.'s costs the
-// same as n judge calls, so it never buys more cache reads than judging would.
-// The global limit caps spend on Jev; a lookup never calls Jev, so it takes 1.
-async function rateLimited(env, ip, weight = 1) {
-  const client = env.LIMITER.get(env.LIMITER.idFromName(`c:${await clientKey(ip, env.RL_SALT ?? "")}`));
-  const [okClient, okGlobal] = await Promise.all([client.take(PER_CLIENT, undefined, weight), globalLimiter(env).take(GLOBAL, drain())]);
-  const refused = !(okClient && okGlobal);
-  if (refused) count("refused:rate_limit");
-  return refused;
-}
-
-// POST /v1/ping {v, event}: one anonymous count per install per day ("active",
-// sent on the first ruling or search page of the day) or at install. The body
-// is a version number and one of two words; nothing else is accepted or kept.
-async function ping(request, env, origin) {
-  if (Number(request.headers.get("Content-Length") ?? 0) > 200) return fail(413, "Verzoek is te groot.", "too_large", origin);
-  const text = await request.text();
-  let body;
+// Any Durable Object failure (the daily quota, an overloaded object) becomes a
+// clean 503 with CORS and a long Retry-After, never an uncaught error page.
+class Unavailable extends Error {}
+async function durable(call) {
   try {
-    body = text.length <= 200 ? JSON.parse(text) : null;
-  } catch {}
-  const { v, event = "active" } = body && typeof body === "object" && !Array.isArray(body) ? body : {};
-  const known = body && typeof body === "object" && Object.keys(body).every((k) => k === "v" || k === "event");
-  if (!known || !["active", "install"].includes(event)) return fail(400, "Onverwacht verzoek.", "invalid_request", origin);
-  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
-  const client = env.LIMITER.get(env.LIMITER.idFromName(`p:${await clientKey(ip, env.RL_SALT ?? "")}`));
-  if (!(await client.take(PING_CLIENT))) {
-    count("refused:rate_limit");
-    return fail(429, "Te veel verzoeken.", "rate_limited", origin, { "Retry-After": "3600" });
+    return await call();
+  } catch {
+    count("refused:unavailable");
+    throw new Unavailable();
   }
-  count(`${event === "install" ? "install" : "ping"}:${versionLabel(v)}`);
-  if (!(await globalLimiter(env).take(GLOBAL, drain()))) return fail(429, "Te veel verzoeken.", "rate_limited", origin, { "Retry-After": "10" });
-  return new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, ...corsHeaders(origin) } });
 }
+const unavailable = (origin) => fail(503, "Leeswijzer is even niet beschikbaar.", "unavailable", origin, { "Retry-After": "3600" });
+const tooMany = (origin, seconds) =>
+  fail(429, "Even rustig aan: te veel verzoeken. Probeer het zo opnieuw.", "rate_limited", origin, { "Retry-After": String(Math.max(1, seconds)) });
+
+// Checks one client against layers 1-3. `budget` names the Durable Object
+// (and its windows): "c" judge calls, "i" lookup items, "l" legacy judge calls.
+// Returns 0 when allowed, otherwise the seconds to send in Retry-After.
+const BUDGETS = { c: CALLS, i: ITEMS, l: LEGACY_CALLS };
+async function limit(env, key, budget, weight = 1) {
+  const name = `${budget}:${key}`;
+  const wait = refused.check(name) || buckets.take(key);
+  if (wait) {
+    count("refused:rate_limit");
+    return wait;
+  }
+  const leased = budget !== "i";
+  if (leased && leases.spend(name)) return 0;
+  const stub = env.LIMITER.get(env.LIMITER.idFromName(name));
+  const extra = leased ? leases.want(name) : 0;
+  let result;
+  try {
+    result = await durable(() => stub.take(BUDGETS[budget], weight, extra));
+  } catch (err) {
+    if (extra) leases.drop(name);
+    throw err;
+  }
+  const { granted, retryAfter } = result;
+  if (granted >= weight) {
+    if (leased) leases.grant(name, granted - weight, extra > 0);
+    return 0;
+  }
+  leases.drop(name);
+  refused.refuse(name, retryAfter);
+  count("refused:rate_limit");
+  return retryAfter;
+}
+
+// ---- Global report -----------------------------------------------------------------------
+let jevCalls = 0; // Jev calls since the last report
+let lastReport = 0;
+let shedUntil = 0; // while Date.now() < shedUntil, Jev calls pause
+
+function report(env, ctx) {
+  const now = Date.now();
+  if (now - lastReport < REPORT_MS) return;
+  const counts = drain();
+  const calls = jevCalls;
+  if (!counts && !calls) return;
+  lastReport = now;
+  jevCalls = 0;
+  ctx.waitUntil(
+    globalLimiter(env)
+      .report(counts, calls)
+      .then((r) => (shedUntil = r?.shed ? Date.now() + REPORT_MS : 0))
+      .catch(() => {
+        // Not delivered: keep the counts for the next report.
+        restore(counts);
+        jevCalls += calls;
+      }),
+  );
+}
+
+// ---- Ping ----------------------------------------------------------------------------------
+
+const amsterdamDay = today;
+function secondsToMidnight() {
+  // Amsterdam is UTC+1 or +2; the next day starts within 24 h. Close enough to
+  // stop asking the Durable Object again today, never longer than a day.
+  const now = Date.now();
+  for (let s = 3_600; s <= 86_400; s += 3_600) if (today(new Date(now + s * 1000)) !== today(new Date(now))) return s;
+  return 86_400;
+}
+
+// POST /v1/ping {v, event}: one anonymous count per client network per day
+// ("active", sent on the first ruling or search page of the day) or at install.
+// The body is a version number and one of two words; nothing else is accepted or
+// kept. A ping that is not counted (already counted today) still gets a 204:
+// the extension never retries a ping.
+async function ping(request, env, ctx, origin) {
+  const read = await readLimited(request, 200);
+  if (read.status) return bodyError(read.status, origin);
+  const body = parseJson(read.text);
+  const { v, event = "active" } = body && typeof body === "object" && !Array.isArray(body) ? body : {};
+  const known = body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).every((k) => k === "v" || k === "event");
+  if (!known || !["active", "install"].includes(event)) return fail(400, "Onverwacht verzoek.", "invalid_request", origin);
+  const noContent = () => new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, ...corsHeaders(origin) } });
+  const key = await clientKey(request, env, 48);
+  const name = `p:${event}:${key}`;
+  if (refused.check(name) || buckets.take(`p:${key}`)) return noContent();
+  const ok = await durable(() => env.LIMITER.get(env.LIMITER.idFromName(`p:${key}`)).ping(event, amsterdamDay()));
+  if (!ok) {
+    refused.refuse(name, secondsToMidnight());
+    return noContent();
+  }
+  // Counted only now, after both checks allowed it.
+  count(`${event === "install" ? "install" : "ping"}:${versionLabel(v)}`);
+  report(env, ctx);
+  return noContent();
+}
+
+// ---- Lookup --------------------------------------------------------------------------------
 
 // POST /v1/lookup {kind, court?, lang?, items: [{state, sentences?}]}: the
 // cached answers for many r.o.'s of one ruling in one request, null where
@@ -538,15 +742,21 @@ async function ping(request, env, origin) {
 // kinds asked without a question exist here, so no question field is accepted;
 // each item is validated exactly like a judge call, and the answers returned are
 // the ones a judge call with that item would return from the cache. A client
-// only gets answers for text it sends itself.
-async function lookup(request, env, origin) {
-  const body = await readBody(request, LIMITS.lookupBody);
-  if (body === null) return fail(413, "Verzoek is te groot.", "too_large", origin);
+// only gets answers for text it sends itself. The cheap checks and the rate
+// limit come before the items are built.
+async function lookup(request, env, ctx, origin, key) {
+  const read = await readLimited(request, LIMITS.lookupBody);
+  if (read.status) return bodyError(read.status, origin);
+  const body = parseJson(read.text);
   if (!body || typeof body !== "object" || Array.isArray(body)) return fail(400, "Body moet een JSON-object zijn.", "invalid_request", origin);
   const { kind, court, lang, items } = body;
   if (Object.keys(body).some((k) => !["kind", "court", "lang", "items"].includes(k))) return fail(400, "Onbekende velden.", "invalid_request", origin);
   if (kind !== "core" && kind !== "sentences") return fail(400, "Onbekende soort beoordeling.", "invalid_request", origin);
   if (!Array.isArray(items) || items.length < 1 || items.length > LIMITS.lookupItems) return fail(400, "Onverwacht aantal passages.", "invalid_request", origin);
+
+  const wait = await limit(env, key, "i", items.length);
+  if (wait) return tooMany(origin, wait);
+
   const built = [];
   for (const item of items) {
     if (!item || typeof item !== "object" || Array.isArray(item) || Object.keys(item).some((k) => k !== "state" && k !== "sentences")) {
@@ -556,100 +766,143 @@ async function lookup(request, env, origin) {
     if (typeof b === "string") return fail(400, b, "invalid_request", origin);
     built.push(b);
   }
-
-  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
-  if (await rateLimited(env, ip, items.length)) {
-    return fail(429, "Even rustig aan: te veel verzoeken. Probeer het zo opnieuw.", "rate_limited", origin, { "Retry-After": "10" });
-  }
   count(`lookup:${kind}`);
   if (!env.DB) return json(200, { answers: items.map(() => null) }, origin);
 
   // One lookup has one kind, court and language, so one template.
   const slots = await Promise.all(built.map(cacheSlot));
-  const answers = await readAnswers(env.DB, slots[0].tpl, slots.map((s) => s.key)).catch(() => (count("cache:error"), items.map(() => null)));
-  const hits = answers.filter(Boolean).length;
+  const answers = await readAnswers(
+    env.DB,
+    slots[0].tpl,
+    slots.map((s) => s.key),
+    built.map((b) => b.questions),
+  ).catch(() => (count("cache:error"), items.map(() => null)));
+  // Hits get their own counter; the judge counters count judge calls only.
   // Misses are counted by the judge call the client makes next.
-  if (hits) {
-    count("cache:hit", hits);
-    count(`judge:${kind}`, hits);
-    count(`src:${source(body)}`, hits);
-  }
+  const hits = answers.filter(Boolean).length;
+  if (hits) count("lookup:hit", hits);
   return json(200, { answers }, origin);
 }
 
 // Which template set a judgement used: Dutch courts, or EU case law per language.
 const source = (body) => (body.lang ? `eu_${body.lang}` : EU_COURTS.has(body.court) || body.court === ADVISER ? "eu_nl" : "nl");
 
+// ---- Judge ---------------------------------------------------------------------------------
+
+async function judge(request, env, ctx, origin, key, legacy) {
+  const read = await readLimited(request, LIMITS.body);
+  if (read.status) return bodyError(read.status, origin);
+  const body = parseJson(read.text);
+  const built = body === undefined ? "Body moet JSON zijn." : build(body);
+  if (typeof built === "string") return fail(400, built, "invalid_request", origin);
+  // Extension 1.0.x reads Rechtspraak.nl only: no EU case law on the old host.
+  if (legacy && source(body) !== "nl") return fail(400, "Onbekende rechter.", "invalid_request", origin);
+  const { questions, state } = built;
+
+  const wait = await limit(env, key, legacy ? "l" : "c");
+  if (wait) return tooMany(origin, wait);
+  // How much extension 1.0.x still calls the old host: when this stays at 0,
+  // workers_dev can be switched off (CONTRIBUTING.md).
+  if (legacy) count("legacy:judge");
+
+  // A cache miss or a D1 hiccup just means asking Jev; it never fails the call.
+  const slot = isCacheable(env, body) ? await cacheSlot(built) : null;
+  let replace = false;
+  if (slot) {
+    const invalid = new Set();
+    const [hit] = await readAnswers(env.DB, slot.tpl, [slot.key], [questions], invalid).catch(() => (count("cache:error"), [null]));
+    if (hit) {
+      count("cache:hit");
+      count(`judge:${body.kind}`);
+      count(`src:${source(body)}`);
+      return json(200, { answers: hit }, origin);
+    }
+    replace = invalid.size > 0;
+    count(replace ? "cache:invalid" : "cache:miss");
+  }
+
+  // Over the global limit: Jev calls pause; the extension does not retry a 503.
+  if (Date.now() < shedUntil) {
+    count("refused:global");
+    return fail(503, "Leeswijzer is even erg druk. Probeer het over een minuut opnieuw.", "unavailable", origin, { "Retry-After": "60" });
+  }
+
+  let upstream;
+  jevCalls++;
+  count("jev:calls");
+  try {
+    upstream = await fetch(gatewayUrl(env), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${env.AI_GATEWAY_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: MODEL,
+        state,
+        questions,
+        providerOptions: { gateway: { zeroDataRetention: true, only: ["typesafe-ai"] } },
+      }),
+    });
+  } catch {
+    count("upstream:error");
+    return fail(502, "Jev is even niet bereikbaar.", "upstream", origin);
+  }
+  if (!upstream.ok) {
+    // 429/503 are the gateway shedding a burst: tell the client to retry.
+    const busy = upstream.status === 429 || upstream.status === 503;
+    count(busy ? "upstream:busy" : "upstream:error");
+    return fail(busy ? 429 : 502, "Jev is even niet bereikbaar.", busy ? "busy" : "upstream", origin, busy ? { "Retry-After": "1" } : {});
+  }
+  const data = await upstream.json().catch(() => ({}));
+  const answers = data.answers ?? {};
+  count(`judge:${body.kind}`);
+  count(`src:${source(body)}`);
+  if (slot && storable(answers, questions)) storeAnswer(env, ctx, slot, answers, replace);
+  return json(200, { answers }, origin);
+}
+
+// ---- Routing -------------------------------------------------------------------------------
+// Everything that can be refused without a Durable Object is refused first:
+// unknown path or method, a missing or foreign Origin, a wrong Content-Type.
+// /health never touches a Durable Object.
+//
+// Two hosts serve this Worker: leeswijzer-api.minuut.eu (extension 1.1 and
+// later, behind the zone's WAF rate-limiting rule) and the workers.dev host
+// that extension 1.0.x has built in. The workers.dev host only serves
+// /v1/judge, Rechtspraak.nl only, with the tighter LEGACY_CALLS limits; it goes
+// away when workers_dev is switched off (CONTRIBUTING.md).
+
+const PATHS = new Set(["/v1/judge", "/v1/lookup", "/v1/ping"]);
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const legacy = url.hostname.endsWith(".workers.dev");
     const origin = allowedOrigin(request, env);
 
     if (url.pathname === "/health" && request.method === "GET") return json(200, { ok: true }, origin);
-    if (url.pathname === "/v1/stats") return (await statsResponse(request, env, url, globalLimiter(env))) ?? fail(404, "Niet gevonden.", "not_found", null);
-    const isPing = url.pathname === "/v1/ping";
-    const isLookup = url.pathname === "/v1/lookup";
-    if (url.pathname !== "/v1/judge" && !isPing && !isLookup) return fail(404, "Niet gevonden.", "not_found", origin);
+    if (url.pathname === "/v1/stats" && !legacy) {
+      try {
+        return (await statsResponse(request, env, url, globalLimiter(env))) ?? fail(404, "Niet gevonden.", "not_found", null);
+      } catch {
+        return fail(503, "Even niet beschikbaar.", "unavailable", null, { "Retry-After": "60" });
+      }
+    }
+    if (legacy ? url.pathname !== "/v1/judge" : !PATHS.has(url.pathname)) return fail(404, "Niet gevonden.", "not_found", origin);
     if (request.method === "OPTIONS") {
       return origin ? new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, ...corsHeaders(origin) } }) : fail(403, "Niet toegestaan.", "forbidden", null);
     }
     if (request.method !== "POST") return fail(405, "Alleen POST.", "method", origin);
     if (!origin) return fail(403, "Alleen voor de Leeswijzer-extensie.", "forbidden", null);
     if (!(request.headers.get("Content-Type") ?? "").startsWith("application/json")) return fail(415, "Verwacht JSON.", "invalid_request", origin);
-    if (isPing) return ping(request, env, origin);
-    if (isLookup) return lookup(request, env, origin);
 
-    const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
-    if (await rateLimited(env, ip)) {
-      return fail(429, "Even rustig aan: te veel verzoeken. Probeer het zo opnieuw.", "rate_limited", origin, { "Retry-After": "10" });
-    }
-
-    const body = await readBody(request);
-    if (body === null) return fail(413, "Verzoek is te groot.", "too_large", origin);
-    const built = body === undefined ? "Body moet JSON zijn." : build(body);
-    if (typeof built === "string") return fail(400, built, "invalid_request", origin);
-    const { questions, state } = built;
-
-    // A cache miss or a D1 hiccup just means asking Jev; it never fails the call.
-    const slot = isCacheable(env, body) ? await cacheSlot(built) : null;
-    if (slot) {
-      const [hit] = await readAnswers(env.DB, slot.tpl, [slot.key]).catch(() => (count("cache:error"), [null]));
-      if (hit) {
-        count("cache:hit");
-        count(`judge:${body.kind}`);
-        count(`src:${source(body)}`);
-        return json(200, { answers: hit }, origin);
-      }
-      count("cache:miss");
-    }
-
-    let upstream;
     try {
-      upstream = await fetch(gatewayUrl(env), {
-        method: "POST",
-        headers: { Authorization: `Bearer ${env.AI_GATEWAY_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: MODEL,
-          state,
-          questions,
-          providerOptions: { gateway: { zeroDataRetention: true, only: ["typesafe-ai"] } },
-        }),
-      });
-    } catch {
-      count("upstream:error");
-      return fail(502, "Jev is even niet bereikbaar.", "upstream", origin);
+      if (url.pathname === "/v1/ping") return await ping(request, env, ctx, origin);
+      const key = await clientKey(request, env);
+      const response = url.pathname === "/v1/lookup" ? await lookup(request, env, ctx, origin, key) : await judge(request, env, ctx, origin, key, legacy);
+      report(env, ctx);
+      return response;
+    } catch (err) {
+      if (err instanceof Unavailable) return unavailable(origin);
+      throw err;
     }
-    if (!upstream.ok) {
-      // 429/503 are the gateway shedding a burst: tell the client to retry.
-      const busy = upstream.status === 429 || upstream.status === 503;
-      count(busy ? "upstream:busy" : "upstream:error");
-      return fail(busy ? 429 : 502, "Jev is even niet bereikbaar.", busy ? "busy" : "upstream", origin, busy ? { "Retry-After": "1" } : {});
-    }
-    const data = await upstream.json().catch(() => ({}));
-    const answers = data.answers ?? {};
-    count(`judge:${body.kind}`);
-    count(`src:${source(body)}`);
-    if (slot && answers && typeof answers === "object" && !Array.isArray(answers) && Object.keys(answers).length) storeAnswer(env, ctx, slot, answers);
-    return json(200, { answers }, origin);
   },
 };
