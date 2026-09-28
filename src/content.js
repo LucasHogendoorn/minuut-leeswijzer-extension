@@ -87,7 +87,14 @@
 
   // ---- Ruling ---------------------------------------------------------------
 
+  // A ruling or a result list is open: the service worker sends the day's one
+  // anonymous "active" ping if it has not yet (src/background.js keeps the date).
+  function markActive() {
+    chrome.runtime.sendMessage({ type: "active" }).catch(() => {});
+  }
+
   function setupRuling(root) {
+    markActive();
     ctx.runId++;
     ctx.root = root;
     ctx.href = location.href;
@@ -525,6 +532,7 @@
     if (site.isResults()) {
       if (S.mode !== "results" || ctx.href !== location.href) {
         S.mode = "results";
+        markActive();
         ctx.href = location.href;
         ctx.hitTarget = HIT_BATCH;
         ctx.hitRun++;

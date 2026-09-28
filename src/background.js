@@ -33,13 +33,53 @@ function endpoint() {
 chrome.runtime.onInstalled.addListener(async ({ reason, previousVersion }) => {
   const version = chrome.runtime.getManifest().version;
   if (reason === "install") {
+    // Count a real first install only: its storage is still empty. (In
+    // testing, an unpacked copy loaded with --load-extension reported
+    // "install" again on every browser start.)
+    const fresh = !Object.keys(await chrome.storage.local.get(null)).length;
     await chrome.storage.local.set({ seenVersion: version });
+    if (fresh) sendPing("install").catch(() => {});
     chrome.tabs.create({ url: chrome.runtime.getURL("options/options.html?welkom") });
   } else if (reason === "update" && previousVersion) {
     const { seenVersion } = await chrome.storage.local.get("seenVersion");
     if (!seenVersion) await chrome.storage.local.set({ seenVersion: previousVersion });
   }
 });
+
+// ---- Anonymous usage count --------------------------------------------------------------
+// At most once per calendar day (Europe/Amsterdam), on the first ruling or
+// search page where the Leeswijzer runs, one ping tells the Worker "an install
+// of version X was active today"; a fresh install sends one "install" ping.
+// The body is only the version and that one word: no ID, no question, no ECLI,
+// no URL. `pingedOn` (the date of the last daily ping) is the only thing kept.
+const amsterdamDay = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Amsterdam" }).format(new Date());
+
+async function sendPing(event) {
+  const url = (await endpoint()).replace(/\/v1\/judge$/, "/v1/ping");
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ v: chrome.runtime.getManifest().version, event }),
+  });
+  return res.ok;
+}
+
+let activeToday; // one check at a time: several tabs may report at once
+function markActive() {
+  activeToday ??= (async () => {
+    const day = amsterdamDay();
+    const { pingedOn } = await chrome.storage.local.get("pingedOn");
+    if (pingedOn === day) return;
+    await chrome.storage.local.set({ pingedOn: day });
+    try {
+      await sendPing("active");
+    } catch {
+      // Not reached (offline): forget the date, so a later page tries again.
+      await (pingedOn ? chrome.storage.local.set({ pingedOn }) : chrome.storage.local.remove("pingedOn"));
+    }
+  })().finally(() => (activeToday = undefined));
+  return activeToday;
+}
 
 async function sha256(text) {
   const bytes = new TextEncoder().encode(text);
@@ -128,6 +168,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ ok: true });
     })();
     return true;
+  }
+  if (msg?.type === "active") {
+    markActive().catch(() => {});
+    return false;
   }
   if (msg?.type === "open-options") {
     chrome.runtime.openOptionsPage();
