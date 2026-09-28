@@ -71,10 +71,11 @@ gebruikt.
   bent. Een oordeel dat met een rechtsvraag is gevraagd, wordt nooit bewaard.
 - **Alleen oordelen over openbare tekst, om rekenkracht te besparen.** Zonder rechtsvraag
   bewaart de server wat het model van een openbare uitspraak vond (Rechtspraak.nl, Curia of
-  EUR-Lex), 180 dagen lang, per uitspraak in één of enkele items. De volgende lezer van
-  dezelfde uitspraak hoeft dan niet opnieuw te wachten en het model hoeft de tekst niet
-  opnieuw te lezen. De sleutel is een hash van de exacte tekst en de vragen aan het model,
-  niet van wie de uitspraak opende; niets daarvan is terug te voeren op jou.
+  EUR-Lex), per rechtsoverweging, in een database van Cloudflare (D1, West-Europa). De
+  volgende lezer van dezelfde uitspraak ziet het oordeel dan meteen en het model hoeft de
+  tekst niet opnieuw te lezen. De sleutel is een hash van de exacte tekst en de vragen aan
+  het model, niet van wie de uitspraak opende. Er staat geen datum, teller of andere
+  gebruiksinformatie bij, dus niets daarvan is terug te voeren op jou.
 - **Anoniem tellen hoeveel mensen Leeswijzer gebruiken.** Eén keer per dag meldt een
   installatie dat ze actief is, met alleen het versienummer: geen ID, geen IP-adres, geen
   uitspraak, geen vraag. De server houdt daarnaast dagtotalen bij, zoals het aantal
