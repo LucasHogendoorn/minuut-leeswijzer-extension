@@ -239,6 +239,14 @@
       clearInterval(this.poll);
       window.removeEventListener("keydown", this.onKey);
       window.removeEventListener("resize", this.frame);
+      // The example question is the tour's, not the lawyer's: drop it, or the
+      // next ruling they open would be judged against Haviltex. The question is
+      // shared across tabs for the session, so this also clears it there.
+      const { S, panel } = this.api;
+      if (S.question === EXAMPLE_QUESTION) {
+        S.recent = S.recent.filter((q) => q !== EXAMPLE_QUESTION);
+        panel.on.ask("");
+      }
       const host = this.host;
       this.host = null;
       host.shadowRoot.querySelector(".tour").classList.add("is-leaving");
