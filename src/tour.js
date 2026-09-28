@@ -169,7 +169,7 @@
       this.host = document.createElement("div");
       this.host.id = "mnt-tour-host";
       this.host.style.cssText = "all: initial; position: fixed; inset: 0; z-index: 2147483001; pointer-events: none;";
-      this.root = this.host.attachShadow({ mode: "open" });
+      this.root = this.host.attachShadow({ mode: "closed" }); // as the panel: not reachable from the page
       const css = document.createElement("link");
       css.rel = "stylesheet";
       css.href = chrome.runtime.getURL("src/tour.css");
@@ -249,7 +249,7 @@
       }
       const host = this.host;
       this.host = null;
-      host.shadowRoot.querySelector(".tour").classList.add("is-leaving");
+      this.root.querySelector(".tour").classList.add("is-leaving");
       setTimeout(() => host.remove(), reduced() ? 0 : 260);
     }
 

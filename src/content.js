@@ -447,11 +447,21 @@
     return Number(el?.textContent.replace(/\D/g, "")) || 0;
   }
 
+  // What each result node was last rendered for (question, settings,
+  // verdict). Kept here, in the content script's own world, never on the page's
+  // nodes: a data attribute there would put the question where any page or
+  // third-party script can read it.
+  const hitRendered = new WeakMap();
+
   // Sync badges on the site's list and the panel's ranked list; judge new hits.
   function scanHits() {
     const hits = MNT.readHits();
+    for (const hit of hits) hit.el.removeAttribute("data-mnt-hit"); // left by 1.1 before this fix
     if (!S.asked || !S.question) {
-      for (const hit of hits) MNT.renderHit(hit, null, S.lowMode);
+      for (const hit of hits) {
+        MNT.renderHit(hit, null, S.lowMode);
+        hitRendered.delete(hit.el);
+      }
       S.hits = [];
       return;
     }
@@ -466,9 +476,9 @@
     for (const hit of hits) {
       const entry = ctx.hitVerdicts.get(hit.ecli);
       const key = `${S.question}|${S.lowMode}|${MNT.shift}|${[...S.hitFilter].join()}|${entry?.pending ? "pending" : entry?.error ? "error" : entry?.p}`;
-      if (hit.el.dataset.mntHit !== key || !hit.el.querySelector(":scope > .mnt-hit")) {
+      if (hitRendered.get(hit.el) !== key || !hit.el.querySelector(":scope > .mnt-hit")) {
         MNT.renderHit(hit, entry, S.lowMode, S.hitFilter);
-        hit.el.dataset.mntHit = key;
+        hitRendered.set(hit.el, key);
       }
       if (entry && !entry.pending) done++;
     }

@@ -141,7 +141,9 @@ MNT.Panel = class {
     this.host = document.createElement("div");
     this.host.id = "mnt-host";
     this.host.style.cssText = "all: initial; position: fixed; z-index: 2147483000; display: none;";
-    this.root = this.host.attachShadow({ mode: "open" });
+    // Closed: page scripts get null from host.shadowRoot, so they cannot read the
+    // question, the recent questions or the verdicts, nor drive the panel.
+    this.root = this.host.attachShadow({ mode: "closed" });
     this.rows = new Map(); // seg id -> row element
     this.hitRows = new Map(); // ecli -> row element
     this.groupOpen = Object.fromEntries(GROUPS.map((g) => [g.key, g.open]));
