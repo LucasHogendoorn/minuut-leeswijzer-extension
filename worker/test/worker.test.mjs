@@ -23,7 +23,17 @@ function fakeStorage() {
         for (const [k, v] of [...map].sort()) if (k.startsWith(prefix) && (end === undefined || k < end)) yield [k, v];
       },
     },
-    setAlarm: async () => {},
+    alarm: null,
+    async setAlarm(t) {
+      this.alarm = t;
+    },
+    async deleteAll() {
+      map.clear();
+      this.alarm = null;
+    },
+    get size() {
+      return map.size;
+    },
   };
 }
 
@@ -31,8 +41,11 @@ function fakeStorage() {
 function namespace() {
   const objects = new Map();
   const ns = {
+    objects,
     calls: [],
-    failing: false,
+    args: [],
+    failing: false, // true: every RPC throws; a number n: the next n RPCs throw
+    failError: () => new Error("Durable Object unavailable"),
     idFromName: (name) => name,
     get(name) {
       return new Proxy(
@@ -40,7 +53,11 @@ function namespace() {
         {
           get: (_, method) => async (...args) => {
             ns.calls.push(`${name.split(":")[0]}.${String(method)}`);
-            if (ns.failing) throw new Error("Durable Object unavailable");
+            ns.args.push({ name, method: String(method), args });
+            if (ns.failing === true || ns.failing > 0) {
+              if (typeof ns.failing === "number") ns.failing--;
+              throw ns.failError();
+            }
             if (!objects.has(name)) objects.set(name, new Limiter({ storage: fakeStorage() }, {}));
             return structuredClone(await objects.get(name)[method](...args));
           },
@@ -95,8 +112,10 @@ function fakeD1() {
 
 let gatewayAnswer = null; // function(questions) -> answers
 let gatewayCalls = 0;
+let gatewayMs = 0;
 globalThis.fetch = async (url, init) => {
   gatewayCalls++;
+  if (gatewayMs) await new Promise((r) => setTimeout(r, gatewayMs * (0.8 + Math.random() * 0.4)));
   const { questions } = JSON.parse(init.body);
   return new Response(JSON.stringify({ answers: gatewayAnswer(questions) }), { status: 200, headers: { "Content-Type": "application/json" } });
 };
@@ -111,7 +130,7 @@ const goodAnswer = (questions) =>
 gatewayAnswer = goodAnswer;
 
 function makeEnv() {
-  return { LIMITER: namespace(), DB: fakeD1(), RL_SALT: "test", ALLOWED_ORIGINS: "", DEV_GATEWAY_URL: "http://127.0.0.1:9/v1/evaluate", AI_GATEWAY_API_KEY: "x" };
+  return { LIMITER: namespace(), DB: fakeD1(), RL_SALT: "test-salt-0123456789", ALLOWED_ORIGINS: "", DEV_GATEWAY_URL: "http://127.0.0.1:9/v1/evaluate", AI_GATEWAY_API_KEY: "x" };
 }
 function makeCtx() {
   const waits = [];
@@ -141,11 +160,13 @@ test("junk is refused before any Durable Object call", async () => {
     [new Request(`${HOST}/v1/judge`, { method: "GET", headers: { Origin: ORIGIN } }), 405],
     [new Request(`${HOST}/v1/judge`, { method: "POST", headers: { Origin: "https://evil.example", "Content-Type": "application/json" }, body: "{}" }), 403],
     [new Request(`${HOST}/v1/judge`, { method: "POST", headers: { Origin: ORIGIN, "Content-Type": "text/plain" }, body: "{}" }), 415],
-    [new Request(`${HOST}/v1/judge`, { method: "POST", headers: { Origin: ORIGIN, "Content-Type": "application/json" }, body: "{}" }), 411],
+    [new Request(`${HOST}/v1/judge`, { method: "POST", headers: { Origin: ORIGIN, "Content-Type": "application/json" }, body: "{}" }), 400], // no Content-Length: read, then refused as invalid
+    [post("/v1/judge", "{}", { headers: { "Content-Length": "12x" } }), 400],
     [post("/v1/judge", "{}", { headers: { "Content-Length": "999999" } }), 413],
     [post("/v1/judge", "not json"), 400],
     [post("/v1/judge", { kind: "nope", state: "x" }), 400],
-    [new Request(`${HOST}/v1/ping`, { method: "POST", headers: { Origin: ORIGIN, "Content-Type": "application/json" }, body: "{}" }), 411],
+    [post("/v1/ping", '{"v":"1.1.0","event":"other"}'), 400],
+    [new Request(`${HOST}/v1/ping`, { method: "POST", headers: { Origin: ORIGIN, "Content-Type": "application/json" }, body: "x".repeat(300) }), 413],
     [post("/v1/lookup", { kind: "core", items: [] }), 400],
     [new Request(`${HOST}/health`), 200],
     [new Request(`${HOST}/v1/stats`), 404], // no STATS_TOKEN
@@ -173,7 +194,28 @@ test("413 when the streamed body exceeds the limit despite a small Content-Lengt
   const res = await worker.fetch(request, env, makeCtx());
   assert.equal(res.status, 413);
   assert.equal(res.headers.get("Access-Control-Allow-Origin"), ORIGIN);
+  // Without any Content-Length the same cap applies.
+  const noLength = new Request(`${HOST}/v1/judge`, {
+    method: "POST",
+    headers: { Origin: ORIGIN, "Content-Type": "application/json", "CF-Connecting-IP": freshIp() },
+    body: new ReadableStream({
+      pull(c) {
+        c.enqueue(new Uint8Array(16_384).fill(32));
+      },
+    }),
+    duplex: "half",
+  });
+  assert.equal((await worker.fetch(noLength, env, makeCtx())).status, 413);
   assert.deepEqual(env.LIMITER.calls, []);
+});
+
+test("a POST without Content-Length (as HTTP/2 may arrive) is served", async () => {
+  const env = makeEnv();
+  const body = JSON.stringify(CORE(31337));
+  const request = new Request(`${HOST}/v1/judge`, { method: "POST", headers: { Origin: ORIGIN, "Content-Type": "application/json", "CF-Connecting-IP": freshIp() }, body });
+  assert.equal(request.headers.get("Content-Length"), null);
+  const res = await worker.fetch(request, env, makeCtx());
+  assert.equal(res.status, 200);
 });
 
 test("a judge call costs one client Durable Object request, no global one; a burst leases", async () => {
@@ -195,12 +237,15 @@ test("a judge call costs one client Durable Object request, no global one; a bur
 });
 
 test("limiter order: a refused client never touches the global object, then waits in memory", async () => {
+  // A fresh module instance: a fresh isolate, whose first report is due.
+  const worker = (await import("../src/index.js?isolate=order")).default;
   const env = makeEnv();
   const ctx = makeCtx();
   const ip = freshIp();
   let refusedAt = -1;
-  // Sequential calls: no leases pile up, every call asks the client object until it refuses.
-  for (let i = 0; i < 320; i++) {
+  // Sequential calls (these also take leases; the Durable Object counts leased
+  // tokens, so the cap is exact either way).
+  for (let i = 0; i < 520; i++) {
     const res = await worker.fetch(post("/v1/judge", CORE(1000 + i), { ip }), env, ctx);
     if (res.status === 429) {
       refusedAt = i;
@@ -210,13 +255,14 @@ test("limiter order: a refused client never touches the global object, then wait
       break;
     }
   }
-  assert.equal(refusedAt, 300, "the 301st call in 10 s is refused");
+  assert.equal(refusedAt, 500, "the 501st call in 10 s is refused");
+  // Every Durable Object request so far went to this client's object or the
+  // periodic report: none per call to the global object.
+  assert.deepEqual([...new Set(env.LIMITER.calls)].sort(), ["c.take", "global.report"]);
+  assert.equal(env.LIMITER.calls.filter((c) => c === "global.report").length, 1, "one report per 10 s per isolate");
   const before = env.LIMITER.calls.length;
   for (let i = 0; i < 200; i++) assert.equal((await worker.fetch(post("/v1/judge", CORE(5000 + i), { ip }), env, ctx)).status, 429);
   assert.equal(env.LIMITER.calls.length, before, "refused flood: no Durable Object requests");
-  assert.ok(!env.LIMITER.calls.slice(0, before).includes("global.take"));
-  // At most one global report per 10 s per isolate, whatever the traffic.
-  assert.ok(env.LIMITER.calls.filter((c) => c === "global.report").length <= 1);
   await ctx.settle();
 });
 
@@ -225,11 +271,11 @@ test("the token bucket stops a flood before the Durable Object", async () => {
   const ctx = makeCtx();
   const ip = freshIp();
   // Parallel flood: leases would let many through without a DO call; the
-  // bucket (300 at once) caps what one isolate lets through at all.
-  const results = await Promise.all(Array.from({ length: 400 }, (_, i) => worker.fetch(post("/v1/judge", CORE(9000 + i), { ip }), env, ctx)));
+  // bucket (500 at once) caps what one isolate lets through at all.
+  const results = await Promise.all(Array.from({ length: 700 }, (_, i) => worker.fetch(post("/v1/judge", CORE(9000 + i), { ip }), env, ctx)));
   const ok = results.filter((r) => r.status === 200).length;
-  assert.ok(ok <= 300, `${ok} allowed`);
-  assert.ok(env.LIMITER.calls.filter((c) => c === "c.take").length <= 300);
+  assert.equal(ok, 500);
+  assert.ok(env.LIMITER.calls.filter((c) => c === "c.take").length <= 500);
   await ctx.settle();
 });
 
@@ -244,7 +290,7 @@ test("a Durable Object failure is a clean 503 with CORS and Retry-After", async 
     const res = await worker.fetch(post(path, body, { ip: freshIp() }), env, makeCtx());
     assert.equal(res.status, 503, path);
     assert.equal(res.headers.get("Access-Control-Allow-Origin"), ORIGIN);
-    assert.equal(res.headers.get("Retry-After"), "3600");
+    assert.equal(res.headers.get("Retry-After"), "30");
     assert.equal((await res.json()).error_type, "unavailable");
   }
 });
@@ -253,7 +299,7 @@ test("IPv6 clients in one /64 share one limit", async () => {
   const env = makeEnv();
   const ctx = makeCtx();
   let status = 200;
-  for (let i = 0; i < 301 && status === 200; i++) {
+  for (let i = 0; i < 501 && status === 200; i++) {
     status = (await worker.fetch(post("/v1/judge", CORE(20_000 + i), { ip: `2001:db8:77:1:${i.toString(16)}::1` }), env, ctx)).status;
   }
   assert.equal(status, 429);
@@ -364,8 +410,8 @@ test("readAnswers: undecodable, oversized or wrong-shape rows are misses", async
 });
 
 test("version allowlist", () => {
-  for (const v of ["1.1.0", "1.0.1", "1.12.34", "1.9.9"]) assert.equal(versionLabel(v), v);
-  for (const v of ["2.0.0", "1.1", "1.1.0.1", "1.123.0", "01.1.0", "1.1.0-beta", "", null, 1.1, "9999.9999.9999"]) assert.equal(versionLabel(v), "other", String(v));
+  for (const v of ["1.0.0", "1.0.1", "1.1.0"]) assert.equal(versionLabel(v), v);
+  for (const v of ["1.1.1", "1.12.34", "2.0.0", "1.1", "1.1.0.1", "01.1.0", "1.1.0-beta", "", null, 1.1, "__proto__"]) assert.equal(versionLabel(v), "other", String(v));
 });
 
 test("ping: one active and three installs per /48 per day, counted only when allowed", async () => {
@@ -419,4 +465,205 @@ test("workers.dev host: only /v1/judge, Rechtspraak only, own limits", async () 
   assert.equal((await worker.fetch(new Request(`${host}/v1/stats`), { ...env, STATS_TOKEN: "t".repeat(40) }, ctx)).status, 404);
   assert.equal((await worker.fetch(post("/v1/judge", { ...CORE(2), lang: "en", court: "het Hof van Justitie" }, { ip, host }), env, ctx)).status, 400);
   await ctx.settle();
+});
+
+// ---- round 2 -------------------------------------------------------------------------------
+
+const fresh = (tag) => import(`../src/index.js?isolate=${tag}`).then((m) => m.default);
+
+test("global pause: over the minute cap, Jev calls get 503 while cache hits are still served", async () => {
+  const worker = await fresh("shed");
+  const env = makeEnv();
+  const ctx = makeCtx();
+  const ip = freshIp();
+  // Other isolates already reported 3,001 Jev calls this minute.
+  await env.LIMITER.get("global").report(undefined, 3_001);
+  const body = CORE(777_001);
+  assert.equal((await worker.fetch(post("/v1/judge", body, { ip }), env, ctx)).status, 200); // first call; its report learns "pause"
+  await ctx.settle();
+  assert.equal((await worker.fetch(post("/v1/judge", body, { ip }), env, ctx)).status, 200, "cache hit still served");
+  const calls = gatewayCalls;
+  const res = await worker.fetch(post("/v1/judge", { kind: "segment", question: "Is dit een test?", state: "Rechtsoverweging 9: iets." }, { ip }), env, ctx);
+  assert.equal(res.status, 503);
+  assert.equal(res.headers.get("Retry-After"), "60");
+  assert.equal((await res.json()).error_type, "unavailable");
+  assert.equal(gatewayCalls, calls, "no Jev call while paused");
+});
+
+test("global daily cap and day rollover", async () => {
+  const storage = fakeStorage();
+  const g = new Limiter({ storage }, {});
+  const { today } = await import("../src/stats.js");
+  storage.kv.put(`jev:${today()}`, 79_999);
+  assert.equal(g.report(undefined, 0).shed, false);
+  assert.equal(g.report(undefined, 1).shed, true, "80,000 Jev calls today: pause");
+  assert.equal(storage.kv.get(`jev:${today()}`), 80_000, "the day's total has its own key");
+  // The next day starts from that day's own key (0).
+  g.day = { day: "2000-01-01", calls: 80_000 };
+  g.minute.clear();
+  storage.kv.put(`jev:${today()}`, 0);
+  assert.equal(g.report(undefined, 1).shed, false);
+});
+
+test("junk versions cannot push the daily Jev total or operational counters out of the row", async () => {
+  const storage = fakeStorage();
+  const g = new Limiter({ storage }, {});
+  const { today } = await import("../src/stats.js");
+  const day = today();
+  // 250 distinct per-version keys (the allowlist stops these at the Worker; this
+  // is the Durable Object's own defence) and then the operational ones.
+  const junk = Object.fromEntries(Array.from({ length: 250 }, (_, i) => [`ping:9.${i}.0`, 1]));
+  g.stats(1, { [day]: junk });
+  g.counters.flush();
+  g.report({ [day]: { "jev:calls": 5, "judge:core": 5, "refused:rate_limit": 2 } }, 5);
+  g.counters.flush();
+  const row = g.stats(1)[0].counters;
+  assert.equal(row["judge:core"], 5);
+  assert.equal(row["jev:calls"], 5);
+  assert.equal(row["refused:rate_limit"], 2);
+  assert.ok(row["other:overflow"] > 0, "per-version keys beyond the cap are merged");
+  assert.equal(storage.kv.get(`jev:${day}`), 5);
+});
+
+test("ping: the object is named per day and forgets everything when the day is over", async () => {
+  const worker = await fresh("pingday");
+  const env = makeEnv();
+  const ctx = makeCtx();
+  const ip = "2001:db8:4242:1::1";
+  assert.equal((await worker.fetch(post("/v1/ping", { v: "1.1.0" }, { ip }), env, ctx)).status, 204);
+  const [name] = [...env.LIMITER.objects.keys()].filter((n) => n.startsWith("p:"));
+  const obj = env.LIMITER.objects.get(name);
+  assert.deepEqual(obj.ctx.storage.kv.get("ping"), { active: 1, install: 0 });
+  const until = obj.ctx.storage.alarm;
+  assert.ok(until > Date.now() && until <= Date.now() + 86_400_000, "alarm at the end of the Amsterdam day");
+  await obj.alarm();
+  assert.equal(obj.ctx.storage.size, 0, "storage deleted at day end");
+  // The next day: another object name for the same network.
+  const RealDate = Date;
+  const offset = 86_400_000;
+  globalThis.Date = class extends RealDate {
+    constructor(...a) {
+      super(...(a.length ? a : [RealDate.now() + offset]));
+    }
+    static now() {
+      return RealDate.now() + offset;
+    }
+  };
+  try {
+    const worker2 = await fresh("pingday2");
+    assert.equal((await worker2.fetch(post("/v1/ping", { v: "1.1.0" }, { ip }), env, ctx)).status, 204);
+  } finally {
+    globalThis.Date = RealDate;
+  }
+  const names = [...env.LIMITER.objects.keys()].filter((n) => n.startsWith("p:"));
+  assert.equal(names.length, 2);
+  assert.ok(!names[1].includes(name.slice(2)), "unlinkable across days");
+});
+
+test("DO errors: a retryable non-overload error is retried once; afterwards leases still work", async () => {
+  const worker = await fresh("doerr");
+  const env = makeEnv();
+  const ctx = makeCtx();
+  const ip = freshIp();
+  env.LIMITER.failError = () => Object.assign(new Error("Network connection lost."), { retryable: true });
+  env.LIMITER.failing = 1;
+  assert.equal((await worker.fetch(post("/v1/judge", CORE(880_001), { ip }), env, ctx)).status, 200, "retried once");
+  env.LIMITER.failError = () => Object.assign(new Error("overloaded"), { retryable: true, overloaded: true });
+  env.LIMITER.failing = 1;
+  // Build up a burst so the next Durable Object call asks for a lease, then fail it.
+  for (let i = 0; i < 3; i++) await worker.fetch(post("/v1/judge", CORE(880_010 + i), { ip }), env, ctx);
+  assert.ok(env.LIMITER.args.some((a) => a.method === "take" && a.args[2] > 0), "a burst asks for a lease");
+  env.LIMITER.failing = 1;
+  // Spend any lease left, so the next call must ask the Durable Object.
+  let status = 200;
+  for (let i = 0; i < 40 && status === 200; i++) status = (await worker.fetch(post("/v1/judge", CORE(880_100 + i), { ip }), env, ctx)).status;
+  assert.equal(status, 503, "an overloaded Durable Object is not retried");
+  const n = env.LIMITER.args.length;
+  assert.equal((await worker.fetch(post("/v1/judge", CORE(880_200), { ip }), env, ctx)).status, 200);
+  const next = env.LIMITER.args.slice(n).find((a) => a.method === "take");
+  assert.ok(next.args[2] > 0, "the failed lease request did not leave the key stuck");
+  await ctx.settle();
+});
+
+test("RL_SALT missing or short: fail closed with 503, no unsalted hash", async () => {
+  for (const RL_SALT of [undefined, "", "short"]) {
+    const env = { ...makeEnv(), RL_SALT };
+    for (const path of ["/v1/judge", "/v1/ping"]) {
+      const res = await worker.fetch(post(path, path === "/v1/ping" ? { v: "1.1.0" } : CORE(1)), env, makeCtx());
+      assert.equal(res.status, 503, `${path} ${RL_SALT}`);
+    }
+    assert.deepEqual(env.LIMITER.calls, []);
+  }
+});
+
+test("the workers.dev host gets a short Retry-After on 503", async () => {
+  const env = makeEnv();
+  env.LIMITER.failing = true;
+  const res = await worker.fetch(post("/v1/judge", CORE(1), { ip: freshIp(), host: "https://minuut-leeswijzer.lucas-hogendoorn.workers.dev" }), env, makeCtx());
+  assert.equal(res.status, 503);
+  assert.equal(res.headers.get("Retry-After"), "5");
+});
+
+test("lookup items have their own budget: refused past 600 in 10 s, judge calls unaffected", async () => {
+  const worker = await fresh("items");
+  const env = makeEnv();
+  const ctx = makeCtx();
+  const ip = freshIp();
+  const items = Array.from({ length: 100 }, (_, i) => ({ state: `Rechtsoverweging ${i}: tekst van de overweging.` }));
+  const statuses = [];
+  for (let i = 0; i < 7; i++) statuses.push((await worker.fetch(post("/v1/lookup", { kind: "core", court: "de Hoge Raad", items }, { ip }), env, ctx)).status);
+  assert.deepEqual(statuses, [200, 200, 200, 200, 200, 200, 429]);
+  assert.equal((await worker.fetch(post("/v1/judge", CORE(990_001), { ip }), env, ctx)).status, 200);
+});
+
+// N module instances of index.js = N isolates, sharing one Durable Object
+// namespace (after a reviewer's scratchpad/rv/sim.mjs).
+async function readers({ isolates, readers: n, calls = 129, ip, env }) {
+  const workers = await Promise.all(Array.from({ length: isolates }, (_, i) => fresh(`sim-${ip}-${i}`)));
+  const ctx = makeCtx();
+  const statuses = {};
+  let rr = 0;
+  const note = (path, res) => {
+    const k = `${path} ${res.status}`;
+    statuses[k] = (statuses[k] ?? 0) + 1;
+  };
+  const next = () => workers[rr++ % workers.length];
+  const reader = async (r) => {
+    // The extension: one lookup of 100 + 1 items, then five judge calls in flight.
+    for (const size of [100, 1]) {
+      const items = Array.from({ length: size }, (_, i) => ({ state: `lezer ${r} punt ${size}-${i}` }));
+      note("lookup", await next().fetch(post("/v1/lookup", { kind: "core", court: "de Hoge Raad", items }, { ip }), env, ctx));
+    }
+    let i = 0;
+    await Promise.all(
+      Array.from({ length: 5 }, async () => {
+        while (i < calls) note("judge", await next().fetch(post("/v1/judge", CORE(`${ip}-${r}-${i++}`), { ip }), env, ctx));
+      }),
+    );
+  };
+  const t0 = Date.now();
+  await Promise.all(Array.from({ length: n }, (_, r) => reader(r)));
+  await ctx.settle();
+  return { statuses, ms: Date.now() - t0 };
+}
+
+test("office NAT: three readers of a cold 101-punt ruling behind one address within 10 s get no 429", async () => {
+  gatewayMs = 20;
+  try {
+    const env = makeEnv();
+    const { statuses, ms } = await readers({ isolates: 2, readers: 3, ip: "203.0.113.200", env });
+    assert.ok(ms < 10_000, `took ${ms} ms`);
+    assert.deepEqual(statuses, { "lookup 200": 6, "judge 200": 3 * 129 });
+  } finally {
+    gatewayMs = 0;
+  }
+});
+
+test("several isolates: the per-client cap still holds across them", async () => {
+  const env = makeEnv();
+  const { statuses } = await readers({ isolates: 4, readers: 6, ip: "203.0.113.201", env });
+  // 6 x 129 judge calls within about a second, spread over 4 isolates: the
+  // client Durable Object allows exactly 500 in 10 s across all of them.
+  assert.equal(statuses["judge 200"], 500, JSON.stringify(statuses));
+  assert.equal(statuses["judge 429"], 6 * 129 - 500, JSON.stringify(statuses));
 });

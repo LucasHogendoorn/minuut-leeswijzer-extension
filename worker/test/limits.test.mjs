@@ -53,13 +53,6 @@ test("token bucket: capacity, refill, retry-after, bounded size", () => {
   assert.ok(!b.buckets.has("a"));
 });
 
-test("token bucket sized like the extension never trips on a cold 101-punt ruling", () => {
-  // Measured: 101 core + 28 sentences judge calls plus 2 lookups within ~10 s.
-  const b = new TokenBuckets({ capacity: 300, perSecond: 15 });
-  let t = 0;
-  for (let i = 0; i < 131; i++, t += 75) assert.equal(b.take("k", 1, t), 0);
-});
-
 test("negative cache: refused key waits, expires, bounded", () => {
   const r = new RefusedClients(2);
   const t = 5_000_000;
@@ -138,20 +131,23 @@ const stream = (chunks) =>
     },
   });
 
-test("body: 411 without Content-Length, 413 when declared too big, streamed cap", async () => {
-  assert.deepEqual(await readLimited(req("{}"), 100), { status: 411 });
-  assert.deepEqual(await readLimited(req("{}", { "Content-Length": "abc" }), 100), { status: 411 });
+test("body: missing Content-Length accepted but capped, 413 when declared too big, 400 when malformed", async () => {
+  assert.deepEqual(await readLimited(req("{}"), 100), { text: "{}" });
+  assert.deepEqual(await readLimited(req("x".repeat(101)), 100), { status: 413 });
+  assert.deepEqual(await readLimited(req("{}", { "Content-Length": "abc" }), 100), { status: 400 });
   assert.deepEqual(await readLimited(req("{}", { "Content-Length": "101" }), 100), { status: 413 });
   assert.deepEqual(await readLimited(req('{"a":1}', { "Content-Length": "7" }), 100), { text: '{"a":1}' });
-  // Understated length: the stream is cut off at the cap, not buffered.
-  let pulled = 0;
-  const endless = new ReadableStream({
-    pull(c) {
-      pulled++;
-      c.enqueue(new Uint8Array(64));
-    },
-  });
-  assert.deepEqual(await readLimited(req(endless, { "Content-Length": "10" }), 1_000), { status: 413 });
-  assert.ok(pulled < 40, `pulled ${pulled} chunks`);
+  // Understated or missing length: the stream is cut off at the cap, not buffered.
+  for (const headers of [{ "Content-Length": "10" }, {}]) {
+    let pulled = 0;
+    const endless = new ReadableStream({
+      pull(c) {
+        pulled++;
+        c.enqueue(new Uint8Array(64));
+      },
+    });
+    assert.deepEqual(await readLimited(req(endless, headers), 1_000), { status: 413 });
+    assert.ok(pulled < 40, `pulled ${pulled} chunks`);
+  }
   assert.deepEqual(await readLimited(req(stream(["{\"x\":", "\"é\"}"]), { "Content-Length": "9" }), 100), { text: '{"x":"é"}' });
 });
