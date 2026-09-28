@@ -15,6 +15,8 @@ ALLOWED_ORIGINS = "chrome-extension://djlkngghkpadabjgmegaeelmffhhljfe,chrome-ex
 
 # Rate limits: exact in-memory counters in a Durable Object (see Limiter in
 # src/index.js): per client 300/10 s and 1200/min, globally 12000/min.
+# The global Limiter also keeps the anonymous daily counters (src/stats.js) in
+# its SQLite storage; same class, so no new migration.
 [[durable_objects.bindings]]
 name = "LIMITER"
 class_name = "Limiter"
@@ -31,3 +33,4 @@ binding = "CACHE"
 id = "7e2daab2a6f94c5c82851497dcbcd99a"
 
 # Secrets, set with: wrangler secret put AI_GATEWAY_API_KEY / wrangler secret put RL_SALT
+# Optional: wrangler secret put STATS_TOKEN switches on GET /v1/stats (404 without it).

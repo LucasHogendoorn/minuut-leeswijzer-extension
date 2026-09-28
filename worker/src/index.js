@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { DailyCounters, count, drain, statsResponse, versionLabel } from "./stats.js";
 
 // Minuut Leeswijzer: Cloudflare Worker in front of Jev (Vercel AI Gateway).
 //
@@ -16,16 +17,23 @@ import { DurableObject } from "cloudflare:workers";
 //   - only browser-extension origins, optionally pinned to the store IDs in
 //     env.ALLOWED_ORIGINS.
 //
-// Privacy: the lawyer's question, the IP and usage are never stored or logged.
+// Privacy: the lawyer's question and the IP are never stored or logged.
 // Every call goes to the gateway with zero data retention forced on, restricted
 // to TypeSafe AI; `observability` is disabled in wrangler.toml. Responses carry
 // only Jev's answers, never usage, routing, cost or upstream error bodies.
 // One exception, by design: calls WITHOUT a question are about public ruling
 // text only, so Jev's answer to those is kept in KV (see "Shared cache") and
 // served to the next reader of the same ruling instead of asking Jev again.
+// Usage is counted, anonymously: per day, how many installs are active and how
+// many judgements, cache hits and refusals there are, as bare numbers without
+// any question, text, ECLI, IP or ID (see src/stats.js).
 
 const GATEWAY = "https://ai-gateway.vercel.sh/v1/evaluate";
 const MODEL = "typesafe-ai/jev";
+// Development only: `wrangler dev` may point at a local mock gateway through
+// DEV_GATEWAY_URL in worker/.dev.vars. Only loopback URLs are accepted, so the
+// variable can never send production traffic anywhere but GATEWAY.
+const gatewayUrl = (env) => (/^http:\/\/(127\.0\.0\.1|localhost):\d+\//.test(env.DEV_GATEWAY_URL ?? "") ? env.DEV_GATEWAY_URL : GATEWAY);
 
 const LIMITS = {
   body: 120_000, // bytes of raw JSON
@@ -412,17 +420,28 @@ async function cacheKey(questions, state) {
 // 400 rapid calls, none refused), so the hard caps live in Durable Objects: one
 // per client (keyed by a salted hash of the IP, never the IP itself) and one
 // global. Counters are in memory only, bucketed per second; nothing is stored.
+// The global object also receives the anonymous daily counts (src/stats.js)
+// with the take() it already gets, and is the only one that writes them.
 
 const PER_CLIENT = [
   { limit: 300, ms: 10_000 },
   { limit: 1_200, ms: 60_000 },
 ];
 const GLOBAL = [{ limit: 12_000, ms: 60_000 }];
+// The daily ping: one per install per day, so a tight per-client cap.
+const PING_CLIENT = [{ limit: 10, ms: 3_600_000 }];
 
 export class Limiter extends DurableObject {
   buckets = new Map(); // second -> count
 
-  take(windows) {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.counters = new DailyCounters(ctx);
+  }
+
+  // `counts`: anonymous daily counts a Worker hands over (global object only).
+  take(windows, counts) {
+    if (counts) this.counters.add(counts);
     const now = Math.floor(Date.now() / 1000);
     const horizon = Math.max(...windows.map((w) => w.ms)) / 1000;
     for (const sec of this.buckets.keys()) if (sec <= now - horizon) this.buckets.delete(sec);
@@ -434,6 +453,15 @@ export class Limiter extends DurableObject {
     this.buckets.set(now, (this.buckets.get(now) ?? 0) + 1);
     return true;
   }
+
+  alarm() {
+    this.counters.flush();
+  }
+
+  stats(days, counts) {
+    if (counts) this.counters.add(counts);
+    return this.counters.read(days);
+  }
 }
 
 async function clientKey(ip, salt) {
@@ -442,12 +470,42 @@ async function clientKey(ip, salt) {
   return [...new Uint8Array(digest).slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+const globalLimiter = (env) => env.LIMITER.get(env.LIMITER.idFromName("global"));
+
 async function rateLimited(env, ip) {
   const client = env.LIMITER.get(env.LIMITER.idFromName(`c:${await clientKey(ip, env.RL_SALT ?? "")}`));
-  const global = env.LIMITER.get(env.LIMITER.idFromName("global"));
-  const [okClient, okGlobal] = await Promise.all([client.take(PER_CLIENT), global.take(GLOBAL)]);
-  return !(okClient && okGlobal);
+  const [okClient, okGlobal] = await Promise.all([client.take(PER_CLIENT), globalLimiter(env).take(GLOBAL, drain())]);
+  const refused = !(okClient && okGlobal);
+  if (refused) count("refused:rate_limit");
+  return refused;
 }
+
+// POST /v1/ping {v, event}: one anonymous count per install per day ("active",
+// sent on the first ruling or search page of the day) or at install. The body
+// is a version number and one of two words; nothing else is accepted or kept.
+async function ping(request, env, origin) {
+  if (Number(request.headers.get("Content-Length") ?? 0) > 200) return fail(413, "Verzoek is te groot.", "too_large", origin);
+  const text = await request.text();
+  let body;
+  try {
+    body = text.length <= 200 ? JSON.parse(text) : null;
+  } catch {}
+  const { v, event = "active" } = body && typeof body === "object" && !Array.isArray(body) ? body : {};
+  const known = body && typeof body === "object" && Object.keys(body).every((k) => k === "v" || k === "event");
+  if (!known || !["active", "install"].includes(event)) return fail(400, "Onverwacht verzoek.", "invalid_request", origin);
+  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+  const client = env.LIMITER.get(env.LIMITER.idFromName(`p:${await clientKey(ip, env.RL_SALT ?? "")}`));
+  if (!(await client.take(PING_CLIENT))) {
+    count("refused:rate_limit");
+    return fail(429, "Te veel verzoeken.", "rate_limited", origin, { "Retry-After": "3600" });
+  }
+  count(`${event === "install" ? "install" : "ping"}:${versionLabel(v)}`);
+  if (!(await globalLimiter(env).take(GLOBAL, drain()))) return fail(429, "Te veel verzoeken.", "rate_limited", origin, { "Retry-After": "10" });
+  return new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, ...corsHeaders(origin) } });
+}
+
+// Which template set a judgement used: Dutch courts, or EU case law per language.
+const source = (body) => (body.lang ? `eu_${body.lang}` : EU_COURTS.has(body.court) || body.court === ADVISER ? "eu_nl" : "nl");
 
 export default {
   async fetch(request, env, ctx) {
@@ -455,13 +513,16 @@ export default {
     const origin = allowedOrigin(request, env);
 
     if (url.pathname === "/health" && request.method === "GET") return json(200, { ok: true }, origin);
-    if (url.pathname !== "/v1/judge") return fail(404, "Niet gevonden.", "not_found", origin);
+    if (url.pathname === "/v1/stats") return (await statsResponse(request, env, url, globalLimiter(env))) ?? fail(404, "Niet gevonden.", "not_found", null);
+    const isPing = url.pathname === "/v1/ping";
+    if (url.pathname !== "/v1/judge" && !isPing) return fail(404, "Niet gevonden.", "not_found", origin);
     if (request.method === "OPTIONS") {
       return origin ? new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, ...corsHeaders(origin) } }) : fail(403, "Niet toegestaan.", "forbidden", null);
     }
     if (request.method !== "POST") return fail(405, "Alleen POST.", "method", origin);
     if (!origin) return fail(403, "Alleen voor de Leeswijzer-extensie.", "forbidden", null);
     if (!(request.headers.get("Content-Type") ?? "").startsWith("application/json")) return fail(415, "Verwacht JSON.", "invalid_request", origin);
+    if (isPing) return ping(request, env, origin);
 
     const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
     if (await rateLimited(env, ip)) {
@@ -479,12 +540,18 @@ export default {
     const key = cacheable ? await cacheKey(questions, state) : null;
     if (key) {
       const hit = await env.CACHE.get(key, "json").catch(() => null);
-      if (hit) return json(200, { answers: hit }, origin);
+      if (hit) {
+        count("cache:hit");
+        count(`judge:${body.kind}`);
+        count(`src:${source(body)}`);
+        return json(200, { answers: hit }, origin);
+      }
+      count("cache:miss");
     }
 
     let upstream;
     try {
-      upstream = await fetch(GATEWAY, {
+      upstream = await fetch(gatewayUrl(env), {
         method: "POST",
         headers: { Authorization: `Bearer ${env.AI_GATEWAY_API_KEY}`, "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -495,15 +562,19 @@ export default {
         }),
       });
     } catch {
+      count("upstream:error");
       return fail(502, "Jev is even niet bereikbaar.", "upstream", origin);
     }
     if (!upstream.ok) {
       // 429/503 are the gateway shedding a burst: tell the client to retry.
       const busy = upstream.status === 429 || upstream.status === 503;
+      count(busy ? "upstream:busy" : "upstream:error");
       return fail(busy ? 429 : 502, "Jev is even niet bereikbaar.", busy ? "busy" : "upstream", origin, busy ? { "Retry-After": "1" } : {});
     }
     const data = await upstream.json().catch(() => ({}));
     const answers = data.answers ?? {};
+    count(`judge:${body.kind}`);
+    count(`src:${source(body)}`);
     if (key && Object.keys(answers).length) {
       ctx.waitUntil(env.CACHE.put(key, JSON.stringify(answers), { expirationTtl: CACHE_TTL }).catch(() => {}));
     }
