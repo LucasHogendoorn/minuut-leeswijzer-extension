@@ -80,8 +80,11 @@ gebruikt.
   uitspraak ooit met Leeswijzer heeft geopend, maar nooit wie of wanneer.
 - **Anoniem tellen hoeveel mensen Leeswijzer gebruiken.** Eén keer per dag meldt een
   installatie dat ze actief is, met alleen het versienummer: geen ID, geen IP-adres, geen
-  uitspraak, geen vraag. De server houdt daarnaast dagtotalen bij, zoals het aantal
-  beoordelingen en fouten. Zo weten we hoeveel mensen de extensie gebruiken, niet wie of wat.
+  uitspraak, geen vraag. De server telt per netwerk hoogstens één melding per dag. Om niet
+  dubbel te tellen, onthoudt hij tot het einde van die dag twee getallen onder een hash (met
+  een geheime sleutel) van de datum en het netwerk, nooit het IP-adres zelf; daarna worden
+  ze gewist. De server houdt daarnaast dagtotalen bij, zoals het aantal beoordelingen en
+  fouten. Zo weten we ongeveer hoeveel mensen de extensie gebruiken, niet wie of wat.
 - **Zero data retention bij het model.** De inhoud wordt niet bewaard en niet gebruikt om
   modellen te trainen.
 - **In je browser alleen deze sessie.** De rechtsvraag en de oordelen staan in het geheugen

@@ -21,7 +21,11 @@ import { LEASE_MAX, Leases, RefusedClients, TokenBuckets, Windows, clientNet, ha
 //   - only browser-extension origins, optionally pinned to the store IDs in
 //     env.ALLOWED_ORIGINS.
 //
-// Privacy: the lawyer's question and the IP are never stored or logged.
+// Privacy: the lawyer's question and the IP are never stored or logged. Rate
+// limits live in Durable Object memory under a salted hash of the network (an
+// IPv4 address or IPv6 /64), never the address; the daily ping keeps two
+// numbers until the end of the day under a salted hash of the day and the
+// network, then deletes them (see PING).
 // Every call goes to the gateway with zero data retention forced on, restricted
 // to TypeSafe AI; `observability` is disabled in wrangler.toml. Responses carry
 // only Jev's answers, never usage, routing, cost or upstream error bodies.
@@ -561,9 +565,12 @@ const GLOBAL = { perMinute: 3_000, perDay: 80_000 };
 const REPORT_MS = 10_000;
 
 // The daily ping per /48 (or IPv4 address) per Amsterdam day: one "active"
-// and three "install". The day is kept in the ping Limiter's storage, so an
-// evicted object does not forget it. An office behind one address is therefore
-// counted as one active network per day, not per install.
+// and three "install". The ping object is named after a salted hash of the day
+// AND the network ("p:" + hash(salt|day|net)), so it is a different object
+// every day and cannot be followed from one day to the next. It keeps
+// { active, install } in storage (an evicted object must not forget it) and an
+// alarm deletes that storage when the day is over. An office behind one address
+// is counted as one active network per day, not per install.
 const PING = { active: 1, install: 3 };
 
 export class Limiter extends DurableObject {
@@ -602,17 +609,20 @@ export class Limiter extends DurableObject {
   }
 
   // Ping object only (one per /48): may this ping be counted today?
-  ping(event, day) {
+  // `until`: when the day is over (ms); the alarm then deletes this object's storage.
+  async ping(event, until) {
     const kv = this.ctx.storage.kv;
-    const seen = kv.get("ping");
-    const row = seen?.day === day ? seen : { day, active: 0, install: 0 };
+    const row = kv.get("ping") ?? { active: 0, install: 0 };
     if (!Object.hasOwn(PING, event) || row[event] >= PING[event]) return false;
     row[event]++;
     kv.put("ping", row);
+    if (row.active + row.install === 1) await this.ctx.storage.setAlarm(until);
     return true;
   }
 
-  alarm() {
+  async alarm() {
+    // A ping object: its day is over, forget it. The global object: write counts.
+    if (this.ctx.storage.kv.get("ping")) return this.ctx.storage.deleteAll();
     this.counters.flush();
   }
 
@@ -721,12 +731,14 @@ function report(env, ctx) {
 // ---- Ping ----------------------------------------------------------------------------------
 
 const amsterdamDay = today;
-function secondsToMidnight() {
-  // Amsterdam is UTC+1 or +2; the next day starts within 24 h. Close enough to
-  // stop asking the Durable Object again today, never longer than a day.
-  const now = Date.now();
-  for (let s = 3_600; s <= 86_400; s += 3_600) if (today(new Date(now + s * 1000)) !== today(new Date(now))) return s;
-  return 86_400;
+// Seconds until the next Amsterdam day starts (to the minute).
+function secondsToMidnight(now = Date.now()) {
+  const day = today(new Date(now));
+  let s = 3_600;
+  while (s < 86_400 && today(new Date(now + s * 1000)) === day) s += 3_600;
+  s -= 3_600;
+  while (today(new Date(now + s * 1000)) === day) s += 60;
+  return s;
 }
 
 // POST /v1/ping {v, event}: one anonymous count per client network per day
@@ -742,12 +754,14 @@ async function ping(request, env, ctx, origin) {
   const known = body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).every((k) => k === "v" || k === "event");
   if (!known || !["active", "install"].includes(event)) return fail(400, "Onverwacht verzoek.", "invalid_request", origin);
   const noContent = () => new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, ...corsHeaders(origin) } });
-  const key = await clientKey(request, env, 48);
+  const day = amsterdamDay();
+  const key = await clientKey(request, env, 48, day);
   const name = `p:${event}:${key}`;
   if (refused.check(name) || buckets.take(`p:${key}`)) return noContent();
-  const ok = await durable(() => env.LIMITER.get(env.LIMITER.idFromName(`p:${key}`)).ping(event, amsterdamDay()));
+  const left = secondsToMidnight();
+  const ok = await durable(() => env.LIMITER.get(env.LIMITER.idFromName(`p:${key}`)).ping(event, Date.now() + left * 1000));
   if (!ok) {
-    refused.refuse(name, secondsToMidnight());
+    refused.refuse(name, left);
     return noContent();
   }
   // Counted only now, after both checks allowed it.

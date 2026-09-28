@@ -5,6 +5,9 @@
 // and a number per calendar day (Europe/Amsterdam). Nothing else is kept: no
 // question, no ruling text, no ECLI, no URL, no IP or hash of one, no install
 // or random ID. A counter cannot say who did something or what they read.
+// (To count "active" once per network per day, a separate ping object keeps
+// two numbers until the end of that day under a salted hash of the day and
+// the network; see PING in src/index.js. The counters here never see it.)
 //
 // Cost on the Workers Free plan (checked 2026-09 against
 // https://developers.cloudflare.com/durable-objects/platform/pricing/):
