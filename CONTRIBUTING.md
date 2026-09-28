@@ -17,8 +17,11 @@ Er is geen build-stap en er zijn geen dependencies: het is gewone JavaScript en 
 De AI-aanroepen lopen via een Cloudflare Worker (`worker/`). Die houdt de API-sleutel,
 bouwt de vragen aan het AI-model uit vaste sjablonen (`QUESTIONS` in
 `worker/src/index.js`), begrenst het aantal verzoeken en bewaart alleen oordelen over
-openbare tekst die zonder rechtsvraag zijn gevraagd (Cloudflare KV, 180 dagen). Lokaal
-gebruikt `wrangler dev` een eigen, lege opslag.
+openbare tekst die zonder rechtsvraag zijn gevraagd (Cloudflare KV, 180 dagen). Daarnaast
+houdt hij anonieme tellers per dag bij (`worker/src/stats.js`): actieve installaties en
+nieuwe installaties per versie, beoordelingen per soort, cache-hits, fouten en
+geweigerde verzoeken. Alleen namen en aantallen: geen vraag, tekst, ECLI, URL, IP-adres of
+ID. Lokaal gebruikt `wrangler dev` een eigen, lege opslag.
 
 De productieserver accepteert alleen de officiële extensie. Een uitgepakte installatie uit
 je eigen map krijgt een andere extensie-ID en wordt geweigerd. Draai de Worker daarom
@@ -48,6 +51,16 @@ lokaal:
 Wie de Worker zelf deployt, zet de secrets met `wrangler secret put AI_GATEWAY_API_KEY` en
 `wrangler secret put RL_SALT`, en de eigen extensie-ID in `ALLOWED_ORIGINS` in
 `worker/wrangler.toml`.
+
+De dagtellers zijn te lezen via `GET /v1/stats?days=30` met een geheim token. Zet dat met
+`wrangler secret put STATS_TOKEN` (bijvoorbeeld de uitvoer van `openssl rand -hex 32`);
+zonder dat secret geeft het endpoint `404`. `STATS_TOKEN=... ./scripts/stats.sh 30` print de
+laatste dertig dagen als tabel (met `STATS_URL=http://127.0.0.1:8787` voor een lokale
+Worker, en dan `STATS_TOKEN` ook in `worker/.dev.vars`).
+
+Zonder Gateway-sleutel kan `wrangler dev` een lokale nep-gateway gebruiken:
+`DEV_GATEWAY_URL=http://127.0.0.1:<poort>/v1/evaluate` in `worker/.dev.vars`. Alleen adressen op
+`127.0.0.1` of `localhost` worden gebruikt.
 
 **Verzoek** (`POST`, JSON):
 
@@ -84,7 +97,7 @@ Wie de Worker zelf deployt, zet de secrets met `wrangler secret put AI_GATEWAY_A
 - De extensie schrijft geen tekst. Ze verandert alleen kleur, volgorde en zichtbaarheid;
   wat er staat, is altijd de tekst van de rechter.
 - De rechtsvraag blijft in de browsersessie en komt nooit in opslag; de server bewaart alleen
-  oordelen over openbare tekst.
+  oordelen over openbare tekst en anonieme dagtellers zonder vraag, tekst, IP-adres of ID.
 - De opmaak van Rechtspraak.nl, Curia en EUR-Lex zelf blijft zoveel mogelijk ongemoeid.
 
 ## Pakket bouwen
