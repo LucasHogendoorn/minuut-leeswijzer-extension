@@ -91,6 +91,7 @@ Zonder Gateway-sleutel kan `wrangler dev` een lokale nep-gateway gebruiken:
 | `src/results.js` | De zoekresultaten |
 | `options/` | Welkomst- en privacypagina |
 | `worker/src/index.js` | De server: vaste vragen aan het AI-model, limieten, gedeelde cache voor openbare tekst |
+| `worker/src/stats.js` | Anonieme dagtellers en `GET /v1/stats` |
 
 ## Uitgangspunten
 
