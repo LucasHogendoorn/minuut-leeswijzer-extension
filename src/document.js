@@ -124,27 +124,25 @@ function textNodes(seg) {
   return nodes;
 }
 
-// Map the segment's text, whitespace collapsed, back to (node, offset) pairs.
+// Map the segment's text, without any whitespace, back to (node, offset)
+// pairs. Whitespace is left out on both sides of the match: where a text node
+// ends (an italic case name before a comma, a link) the page and innerText
+// disagree about spaces, and a sentence with such a boundary was never found.
 function textIndex(seg) {
   let flat = "";
   const at = [];
   for (const node of textNodes(seg)) {
     const t = node.textContent;
     for (let i = 0; i < t.length; i++) {
-      const ch = /\s/.test(t[i]) ? " " : t[i];
-      if (ch === " " && flat.endsWith(" ")) continue;
-      flat += ch;
+      if (/\s/.test(t[i])) continue;
+      flat += t[i];
       at.push([node, i]);
-    }
-    if (!flat.endsWith(" ")) {
-      flat += " ";
-      at.push([node, t.length]);
     }
   }
   return { flat, at };
 }
 
-const squash = (t) => t.replace(/\s+/g, " ").trim();
+const squash = (t) => t.replace(/\s+/g, "");
 
 MNT.markSentences = (seg, picks) => {
   if (seg.marked) return;
