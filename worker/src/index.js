@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
-import { DailyCounters, count, drain, statsResponse, versionLabel } from "./stats.js";
+import { DailyCounters, count, drain, statsResponse, today, versionLabel } from "./stats.js";
+import { answerKey, readAnswers, templateId, writeAnswer } from "./cache.js";
 
 // Minuut Leeswijzer: Cloudflare Worker in front of Jev (Vercel AI Gateway).
 //
@@ -22,8 +23,9 @@ import { DailyCounters, count, drain, statsResponse, versionLabel } from "./stat
 // to TypeSafe AI; `observability` is disabled in wrangler.toml. Responses carry
 // only Jev's answers, never usage, routing, cost or upstream error bodies.
 // One exception, by design: calls WITHOUT a question are about public ruling
-// text only, so Jev's answer to those is kept in KV (see "Shared cache") and
-// served to the next reader of the same ruling instead of asking Jev again.
+// text only, so Jev's answer to those is kept in D1 (see "Shared cache" and
+// src/cache.js) and served to the next reader of the same ruling instead of
+// asking Jev again.
 // Usage is counted, anonymously: per day, how many installs are active and how
 // many judgements, cache hits and refusals there are, as bare numbers without
 // any question, text, ECLI, IP or ID (see src/stats.js).
@@ -358,7 +360,8 @@ function allowedOrigin(request, env) {
 
 const isText = (v, max) => typeof v === "string" && v.trim().length > 0 && v.length <= max;
 
-// Returns [questions, state] or an error message.
+// Returns { questions, state, template } or an error message. `template`
+// names the question set without the text-dependent parts, for the cache.
 function build(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) return "Body moet een JSON-object zijn.";
   const extra = Object.keys(body).filter((k) => !["kind", "question", "state", "sentences", "court", "lang"].includes(k));
@@ -384,7 +387,13 @@ function build(body) {
   // gets the EU templates in the page's language; the Dutch courts keep theirs.
   const eu = lang !== undefined || EU_COURTS.has(court) || court === ADVISER;
   const set = eu ? EU_QUESTIONS[lang ?? "nl"] : QUESTIONS;
-  return [set[kind](q, sentences, court ?? "de rechter"), state];
+  const speaker = court ?? "de rechter";
+  return {
+    questions: set[kind](q, sentences, speaker),
+    state,
+    // Only "core" names the court in its questions among the cached kinds.
+    template: { kind, lang: eu ? (lang ?? "nl") : "", court: kind === "core" ? speaker : "", blank: () => set[kind]("", [], speaker) },
+  };
 }
 
 async function readBody(request) {
@@ -404,15 +413,27 @@ async function readBody(request) {
 // and the Worker's own template, nothing the user typed. The key hashes exactly
 // what goes to Jev (model, built questions, state), so any template change starts
 // a fresh cache by itself. Only answers the Worker got from Jev are written, so a
-// client cannot plant answers for text it did not send. Entries expire so junk
-// text sent by abusers does not pile up.
+// client cannot plant answers for text it did not send. Storage, keys, codec and
+// costs: src/cache.js. A D1 error (for instance the daily quota) is a miss and
+// never fails a call; it is counted as cache:error.
 
-const CACHE_TTL = 180 * 24 * 60 * 60; // seconds
+const isCacheable = (env, body) => Boolean(env.DB) && !(body.question ?? "").trim() && (body.kind === "core" || body.kind === "sentences");
 
-async function cacheKey(questions, state) {
-  const bytes = new TextEncoder().encode(JSON.stringify({ model: MODEL, questions, state }));
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return `v1:${[...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+// The template fingerprint per question set; a handful per isolate.
+const templates = new Map();
+function templateOf(template) {
+  const name = `${template.kind}|${template.lang}|${template.court}`;
+  if (!templates.has(name)) templates.set(name, templateId(MODEL, JSON.stringify(template.blank())));
+  return templates.get(name);
+}
+
+async function cacheSlot(built) {
+  const [tpl, key] = await Promise.all([templateOf(built.template), answerKey(MODEL, JSON.stringify(built.questions), built.state)]);
+  return { tpl, key, template: { kind: built.template.kind, lang: built.template.lang, court: built.template.court, model: MODEL } };
+}
+
+function storeAnswer(env, ctx, slot, answers) {
+  ctx.waitUntil(writeAnswer(env.DB, slot.tpl, slot.key, answers, slot.template, today()).catch(() => count("cache:error")));
 }
 
 // ---- Rate limiting: exact counters in Durable Objects --------------------------------
@@ -533,13 +554,12 @@ export default {
     if (body === null) return fail(413, "Verzoek is te groot.", "too_large", origin);
     const built = body === undefined ? "Body moet JSON zijn." : build(body);
     if (typeof built === "string") return fail(400, built, "invalid_request", origin);
-    const [questions, state] = built;
+    const { questions, state } = built;
 
-    // A cache miss or a KV hiccup just means asking Jev; it never fails the call.
-    const cacheable = Boolean(env.CACHE) && !(body.question ?? "").trim();
-    const key = cacheable ? await cacheKey(questions, state) : null;
-    if (key) {
-      const hit = await env.CACHE.get(key, "json").catch(() => null);
+    // A cache miss or a D1 hiccup just means asking Jev; it never fails the call.
+    const slot = isCacheable(env, body) ? await cacheSlot(built) : null;
+    if (slot) {
+      const [hit] = await readAnswers(env.DB, slot.tpl, [slot.key]).catch(() => (count("cache:error"), [null]));
       if (hit) {
         count("cache:hit");
         count(`judge:${body.kind}`);
@@ -575,9 +595,7 @@ export default {
     const answers = data.answers ?? {};
     count(`judge:${body.kind}`);
     count(`src:${source(body)}`);
-    if (key && Object.keys(answers).length) {
-      ctx.waitUntil(env.CACHE.put(key, JSON.stringify(answers), { expirationTtl: CACHE_TTL }).catch(() => {}));
-    }
+    if (slot && answers && typeof answers === "object" && !Array.isArray(answers) && Object.keys(answers).length) storeAnswer(env, ctx, slot, answers);
     return json(200, { answers }, origin);
   },
 };

@@ -1,6 +1,8 @@
 name = "minuut-leeswijzer"
 main = "src/index.js"
 compatibility_date = "2026-03-01"
+# node:zlib for the cache's answer codec (src/cache.js).
+compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
 # No request logging: Workers Logs and traces stay off.
@@ -26,11 +28,14 @@ tag = "v1"
 new_sqlite_classes = ["Limiter"]
 
 # Shared cache of Jev's answers about public ruling text (calls without a
-# question only; see "Shared cache" in src/index.js). wrangler dev uses a local
-# stand-in; deploying your own Worker needs your own namespace id here.
-[[kv_namespaces]]
-binding = "CACHE"
-id = "7e2daab2a6f94c5c82851497dcbcd99a"
+# question only; see src/cache.js). Schema in migrations/. wrangler dev uses a
+# local database: wrangler d1 migrations apply leeswijzer-cache --local.
+# Deploying your own Worker needs your own database id here.
+[[d1_databases]]
+binding = "DB"
+database_name = "leeswijzer-cache"
+database_id = "a8bcc9af-76c1-4441-b155-66b54e60d778"
+migrations_dir = "migrations"
 
 # Secrets, set with: wrangler secret put AI_GATEWAY_API_KEY / wrangler secret put RL_SALT
 # Optional: wrangler secret put STATS_TOKEN switches on GET /v1/stats (404 without it).
