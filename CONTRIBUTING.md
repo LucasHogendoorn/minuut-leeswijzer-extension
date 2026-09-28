@@ -52,12 +52,15 @@ lokaal:
    { "endpoint": "http://127.0.0.1:8787/v1/judge" }
    ```
 
+   Lokaal en op het custom domain bedient de Worker alle endpoints; alleen de oude
+   `*.workers.dev`-host is beperkt (zie hieronder).
+
    Alleen een uitgepakte installatie leest dit bestand; de store-versie gebruikt altijd de
    productieserver. Herlaad daarna de extensie.
 
 Wie de Worker zelf deployt, zet de secrets met `wrangler secret put AI_GATEWAY_API_KEY` en
-`wrangler secret put RL_SALT`, en de eigen extensie-ID in `ALLOWED_ORIGINS` in
-`worker/wrangler.toml`. Voor de cache: `wrangler d1 create leeswijzer-cache`, het `database_id`
+`wrangler secret put RL_SALT`, de eigen extensie-ID in `ALLOWED_ORIGINS` en het eigen
+domein in `routes` in `worker/wrangler.toml`. Voor de cache: `wrangler d1 create leeswijzer-cache`, het `database_id`
 in `worker/wrangler.toml` en `wrangler d1 migrations apply leeswijzer-cache --remote`.
 
 Hoe vol de cache is: `./scripts/cache.sh` (grootte en sjablonen), `./scripts/cache.sh rows`
@@ -65,10 +68,44 @@ Hoe vol de cache is: `./scripts/cache.sh` (grootte en sjablonen), `./scripts/cac
 oud sjabloon weghalen; elke verwijderde rij telt als geschreven rij).
 
 De dagtellers zijn te lezen via `GET /v1/stats?days=30` met een geheim token. Zet dat met
-`wrangler secret put STATS_TOKEN` (bijvoorbeeld de uitvoer van `openssl rand -hex 32`);
-zonder dat secret geeft het endpoint `404`. `STATS_TOKEN=... ./scripts/stats.sh 30` print de
+`wrangler secret put STATS_TOKEN` (minstens 32 tekens, bijvoorbeeld de uitvoer van
+`openssl rand -hex 32`); zonder dat secret, of met een korter token, geeft het endpoint
+`404`. "Actief" telt netwerken (een IPv4-adres of een IPv6-/48) met een actieve installatie,
+hoogstens één per netwerk per dag: een kantoor achter één adres telt als één. `STATS_TOKEN=... ./scripts/stats.sh 30` print de
 laatste dertig dagen als tabel (met `STATS_URL=http://127.0.0.1:8787` voor een lokale
 Worker, en dan `STATS_TOKEN` ook in `worker/.dev.vars`).
+
+Tests voor de Worker (Node 22, zonder dependencies), vanuit `worker/`:
+
+```sh
+node --import ./test/register.mjs --test test/*.test.mjs
+```
+
+## Domein, limieten en de oude workers.dev-host
+
+De API draait op `https://leeswijzer-api.minuut.eu` (custom domain van de Worker, zone
+`minuut.eu`). Extensie 1.1 en later praten alleen daarmee. Op die hostnaam staat een
+WAF-rate-limitingregel van de zone (Cloudflare Free: één regel): hij telt per IP-adres
+alle verzoeken naar `leeswijzer-api.minuut.eu`, ook de CORS-preflights (`OPTIONS`), staat
+er 500 per 10 seconden toe en blokkeert daarna 10 seconden. Eén lezer die een Europees
+arrest van 101 punten koud opent, kwam in de meting op hoogstens ~150 verzoeken per 10
+seconden (preflights worden door de browser gecachet, `Access-Control-Max-Age`), dus drie
+zware lezers achter één kantooradres passen eronder. De limieten in de Worker zelf (per
+client 300 beoordelingen per 10 s en 900 per minuut, apart 600/1800 cache-opzoekingen;
+wereldwijd 3000 Jev-aanroepen per minuut en 80.000 per dag) en hoe ze gemeten zijn, staan
+bij "Rate limiting" in `worker/src/index.js`. Een client is één IPv4-adres of één IPv6-/64:
+een heel kantoor achter één NAT-adres is één client, daarom zijn de limieten ruim genoeg
+voor enkele zware lezers tegelijk.
+
+Extensie 1.0.x heeft `https://minuut-leeswijzer.lucas-hogendoorn.workers.dev` ingebouwd en
+de zone-WAF beschermt die hostnaam niet. Daarom staat `workers_dev = true` nog aan, maar
+bedient die host alleen `/v1/judge`, alleen Rechtspraak.nl, met strengere limieten (200 per
+10 s, 600 per minuut); `/v1/lookup`, `/v1/ping` en `/v1/stats` geven daar `404`.
+**Uitzetten:** de kolom `1.0.x` van `./scripts/stats.sh` telt de beoordelingen via de oude
+host. Zet `workers_dev = false` in `worker/wrangler.toml` en deploy opnieuw zodra die kolom
+een week lang (bijna) 0 is, en uiterlijk twee weken nadat 1.1 in de Chrome Web Store staat
+(de store werkt extensies binnen een paar dagen automatisch bij). Daarna kunnen ook
+`LEGACY_CALLS` en de `legacy`-tak in `worker/src/index.js` weg.
 
 Zonder Gateway-sleutel kan `wrangler dev` een lokale nep-gateway gebruiken:
 `DEV_GATEWAY_URL=http://127.0.0.1:<poort>/v1/evaluate` in `worker/.dev.vars`. Alleen adressen op
@@ -85,8 +122,15 @@ Zonder Gateway-sleutel kan `wrangler dev` een lokale nep-gateway gebruiken:
   (de zinnen van één r.o. rangschikken; dan met `sentences: [...]`). Optioneel: `court`, uit
   een vaste lijst (`COURTS`); bij Europese rechtspraak ook bij `segment`.
 - **Antwoord:** `{ "answers": { … } }`. Hoe de extensie die leest, staat in `src/jev.js`.
-- **Fouten:** een `400` wordt niet herhaald; bij `429` en `5xx` probeert de extensie het tot
-  vier keer opnieuw. Een `message`-veld in de JSON wordt de foutmelding.
+- **Fouten:** `{ "message", "error_type" }`. De extensie herhaalt alleen een `429` met
+  `error_type: "busy"` (Jev heeft het even druk; tot vier pogingen, na `Retry-After`) en een
+  netwerkfout (één keer). `400`, `429` met `rate_limited` (te veel verzoeken van dit adres) en
+  `503` met `unavailable` (server even niet beschikbaar of boven de dag- of totaallimiet)
+  worden niet herhaald: het paneel toont de melding met "Opnieuw". Een `POST` zonder
+  `Content-Length` krijgt `411`, een te grote body `413`.
+- **Zinnen** (`kind: "sentences"`): `state` is alleen een kopregel (hoogstens 1000 tekens),
+  de zinnen samen hoogstens 24.000 tekens; een verzoek draagt nooit meer dan 31.000 tekens
+  naar het model.
 
 **Opzoeken in de cache** (`POST /v1/lookup`, JSON): de bewaarde oordelen voor veel r.o.'s van
 één uitspraak in één verzoek, alleen voor soorten zonder rechtsvraag.
@@ -117,7 +161,9 @@ Zonder Gateway-sleutel kan `wrangler dev` een lokale nep-gateway gebruiken:
 | `options/` | Welkomst- en privacypagina |
 | `worker/src/index.js` | De server: vaste vragen aan het AI-model, limieten, `/v1/judge` en `/v1/lookup` |
 | `worker/src/cache.js`, `worker/migrations/` | Gedeelde cache voor openbare tekst (D1): sleutels, opslag, kosten |
+| `worker/src/limits.js` | Clients per IPv4-adres of IPv6-netwerk, limieten in het geheugen, body-limiet |
 | `worker/src/stats.js` | Anonieme dagtellers en `GET /v1/stats` |
+| `worker/test/` | Tests voor de Worker (`node:test`) |
 
 ## Uitgangspunten
 

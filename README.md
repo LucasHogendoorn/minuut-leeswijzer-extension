@@ -75,7 +75,9 @@ gebruikt.
   volgende lezer van dezelfde uitspraak ziet het oordeel dan meteen en het model hoeft de
   tekst niet opnieuw te lezen. De sleutel is een hash van de exacte tekst en de vragen aan
   het model, niet van wie de uitspraak opende. Er staat geen datum, teller of andere
-  gebruiksinformatie bij, dus niets daarvan is terug te voeren op jou.
+  gebruiksinformatie bij, dus niets daarvan is terug te voeren op jou. Omdat de cache
+  gedeeld is, kan een opzoeking in de cache wel laten zien dat iemand een openbare
+  uitspraak ooit met Leeswijzer heeft geopend, maar nooit wie of wanneer.
 - **Anoniem tellen hoeveel mensen Leeswijzer gebruiken.** Eén keer per dag meldt een
   installatie dat ze actief is, met alleen het versienummer: geen ID, geen IP-adres, geen
   uitspraak, geen vraag. De server houdt daarnaast dagtotalen bij, zoals het aantal
