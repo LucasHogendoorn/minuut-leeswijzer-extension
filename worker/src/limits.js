@@ -162,7 +162,7 @@ export class Leases {
     this.max = max;
     this.leases = new Map(); // key -> { tokens, until }
     this.recent = new Map(); // key -> ms timestamps of recent calls
-    this.asking = new Set(); // keys with a lease request in flight
+    this.asking = new Map(); // key -> ms timestamp of the lease request in flight
   }
   // Records a call and returns true when a leased token paid for it.
   spend(key, now = Date.now()) {
@@ -182,12 +182,15 @@ export class Leases {
   // How many extra tokens to ask the Durable Object for with this call; 0 while
   // another call for this key is already asking. A non-zero answer must be
   // followed by grant() (also with 0) to end the request.
+  // An entry older than LEASE_MS is ignored, so a request that never came back
+  // (a cancelled RPC) cannot block leases for good.
   want(key, now = Date.now()) {
-    if (this.asking.has(key)) return 0;
+    if ((this.asking.get(key) ?? -Infinity) > now - LEASE_MS) return 0;
     const times = this.recent.get(key) ?? [];
     const n = Math.min(LEASE_MAX, Math.max(0, times.filter((t) => t > now - LEASE_MS).length - 1));
     if (n) {
-      this.asking.add(key);
+      this.asking.delete(key);
+      this.asking.set(key, now);
       bound(this.asking, this.max);
     }
     return n;
