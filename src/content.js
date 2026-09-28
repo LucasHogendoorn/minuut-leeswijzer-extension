@@ -310,6 +310,15 @@
     );
     await verdictTask;
     if (cancelled()) return;
+    // Stopped (server unavailable, too many requests): the r.o.'s not judged
+    // show as not read instead of waiting forever; "Opnieuw" starts over.
+    if (stopped) {
+      for (const seg of S.segments) {
+        if (seg.result) continue;
+        seg.result = { error: S.error?.message ?? "" };
+        applySegment(seg);
+      }
+    }
     S.running = false;
     S.progress.ms = performance.now() - started;
     S.progress.cached = allCached;

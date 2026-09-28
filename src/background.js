@@ -103,12 +103,16 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 //   - 429 "busy" (Jev shedding a burst): up to MAX_BUSY_ATTEMPTS, after the
 //     Retry-After the Worker sends;
 //   - a network error: one more try;
+//   - 429 "rate_limited" (this address sent too much; an office behind one
+//     address shares the limit): one more try when the Worker asks to wait at
+//     most 10 s;
 //   - 503 / "unavailable" (the server is down or over its daily or global
-//     limit), 429 "rate_limited" (this address sent too much) and every other
-//     error: no retry; the panel shows the message and offers "Opnieuw".
+//     limit) and every other error: no retry; the panel shows the message and
+//     offers "Opnieuw".
 async function callJev(body) {
   const url = await endpoint();
   let networkRetried = false;
+  let limitRetried = false;
   for (let attempt = 1; ; attempt++) {
     let res;
     try {
@@ -125,14 +129,19 @@ async function callJev(body) {
     if (res.status === 503 || detail.error_type === "unavailable") {
       throw new JevError("unavailable", "Leeswijzer is even niet beschikbaar. Probeer het later opnieuw.");
     }
+    const retryAfter = Number(res.headers.get("retry-after"));
     if (res.status === 429 && detail.error_type === "rate_limited") {
+      if (!limitRetried && retryAfter > 0 && retryAfter <= 10) {
+        limitRetried = true;
+        await sleep(retryAfter * 1000 + Math.random() * 500);
+        continue;
+      }
       throw new JevError("rate_limited", "Even rustig aan: te veel verzoeken. Probeer het zo opnieuw.");
     }
     const busy = res.status === 429 && detail.error_type === "busy";
     if (!busy) throw new JevError("upstream", detail.message ?? `De server antwoordde ${res.status}.`);
     if (attempt >= MAX_BUSY_ATTEMPTS) throw new JevError("busy", detail.message ?? "Jev is even niet bereikbaar.");
     // Short, jittered retries: the gateway's 429/503 under bursts clears fast.
-    const retryAfter = Number(res.headers.get("retry-after"));
     await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter, 10) * 1000 : (200 + Math.random() * 300) * 2 ** attempt);
   }
 }

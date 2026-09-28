@@ -124,12 +124,13 @@ Zonder Gateway-sleutel kan `wrangler dev` een lokale nep-gateway gebruiken:
   (de zinnen van één r.o. rangschikken; dan met `sentences: [...]`). Optioneel: `court`, uit
   een vaste lijst (`COURTS`); bij Europese rechtspraak ook bij `segment`.
 - **Antwoord:** `{ "answers": { … } }`. Hoe de extensie die leest, staat in `src/jev.js`.
-- **Fouten:** `{ "message", "error_type" }`. De extensie herhaalt alleen een `429` met
-  `error_type: "busy"` (Jev heeft het even druk; tot vier pogingen, na `Retry-After`) en een
-  netwerkfout (één keer). `400`, `429` met `rate_limited` (te veel verzoeken van dit adres) en
-  `503` met `unavailable` (server even niet beschikbaar of boven de dag- of totaallimiet)
-  worden niet herhaald: het paneel toont de melding met "Opnieuw". Een `POST` zonder
-  `Content-Length` krijgt `411`, een te grote body `413`.
+- **Fouten:** `{ "message", "error_type" }`. De extensie herhaalt een `429` met
+  `error_type: "busy"` (Jev heeft het even druk; tot vier pogingen, na `Retry-After`), een
+  `429` met `rate_limited` (te veel verzoeken van dit adres) één keer als `Retry-After`
+  hoogstens 10 seconden is, en een netwerkfout één keer. `400` en `503` met `unavailable`
+  (server even niet beschikbaar of boven de dag- of totaallimiet; `Retry-After: 30`) worden
+  niet herhaald: het paneel toont de melding met "Opnieuw". Een body groter dan de limiet
+  krijgt `413`, ook zonder `Content-Length` (de body wordt met een bytelimiet gelezen).
 - **Zinnen** (`kind: "sentences"`): `state` is alleen een kopregel (hoogstens 1000 tekens),
   de zinnen samen hoogstens 24.000 tekens; een verzoek draagt nooit meer dan 31.000 tekens
   naar het model.
