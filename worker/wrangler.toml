@@ -47,4 +47,5 @@ database_id = "a8bcc9af-76c1-4441-b155-66b54e60d778"
 migrations_dir = "migrations"
 
 # Secrets, set with: wrangler secret put AI_GATEWAY_API_KEY / wrangler secret put RL_SALT
+# (RL_SALT: 16+ characters; without it the Worker answers 503).
 # Optional: wrangler secret put STATS_TOKEN switches on GET /v1/stats (404 without it).

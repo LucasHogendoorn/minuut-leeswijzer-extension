@@ -35,10 +35,12 @@ lokaal:
    ```sh
    AI_GATEWAY_API_KEY=je-sleutel
    ALLOWED_ORIGINS=
+   RL_SALT=een-willekeurige-tekst-van-16-of-meer-tekens
    ```
 
-   Een lege `ALLOWED_ORIGINS` laat elke uitgepakte extensie toe. Lokaal is geen `RL_SALT`
-   nodig.
+   Een lege `ALLOWED_ORIGINS` laat elke uitgepakte extensie toe. Zonder `RL_SALT` van
+   minstens 16 tekens antwoordt de Worker `503`: hij gebruikt nooit een hash zonder geheime
+   sleutel.
 3. Maak de lokale database aan en start de Worker:
 
    ```sh

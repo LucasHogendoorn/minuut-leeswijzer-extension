@@ -623,20 +623,40 @@ export class Limiter extends DurableObject {
 }
 
 const globalLimiter = (env) => env.LIMITER.get(env.LIMITER.idFromName("global"));
-const clientKey = (request, env, prefix = 64) => hashKey(clientNet(request.headers.get("CF-Connecting-IP") ?? "unknown", prefix), env.RL_SALT ?? "");
+// RL_SALT must be set (16+ characters): without it the hashes would be plain
+// hashes of addresses, so the Worker refuses to serve (503) rather than use one.
+class Unsalted extends Error {}
+function salt(env) {
+  if (typeof env.RL_SALT !== "string" || env.RL_SALT.length < 16) throw new Unsalted();
+  return env.RL_SALT;
+}
+const clientKey = (request, env, prefix = 64, day = "") =>
+  hashKey(`${day}|${clientNet(request.headers.get("CF-Connecting-IP") ?? "unknown", prefix)}`, salt(env));
 
 // Any Durable Object failure (the daily quota, an overloaded object) becomes a
-// clean 503 with CORS and a long Retry-After, never an uncaught error page.
+// clean 503 with CORS, never an uncaught error page. A failure Cloudflare marks
+// as retryable and not caused by overload (a reset during a deploy, "Network
+// connection lost") is tried once more first
+// (https://developers.cloudflare.com/durable-objects/best-practices/error-handling/).
 class Unavailable extends Error {}
 async function durable(call) {
   try {
     return await call();
-  } catch {
+  } catch (err) {
+    if (err?.retryable && !err?.overloaded) {
+      try {
+        return await call();
+      } catch {}
+    }
     count("refused:unavailable");
     throw new Unavailable();
   }
 }
-const unavailable = (origin) => fail(503, "Leeswijzer is even niet beschikbaar.", "unavailable", origin, { "Retry-After": "3600" });
+// Retry-After: 30 s on the API host. Extension 1.0.x (workers.dev) honours
+// Retry-After before its next attempt, so it gets 5 s: a long value would keep
+// its panel waiting.
+const unavailable = (origin, legacy = false) =>
+  fail(503, "Leeswijzer is even niet beschikbaar.", "unavailable", origin, { "Retry-After": legacy ? "5" : "30" });
 const tooMany = (origin, seconds) =>
   fail(429, "Even rustig aan: te veel verzoeken. Probeer het zo opnieuw.", "rate_limited", origin, { "Retry-After": String(Math.max(1, seconds)) });
 
@@ -903,7 +923,7 @@ export default {
       report(env, ctx);
       return response;
     } catch (err) {
-      if (err instanceof Unavailable) return unavailable(origin);
+      if (err instanceof Unavailable || err instanceof Unsalted) return unavailable(origin, legacy);
       throw err;
     }
   },
