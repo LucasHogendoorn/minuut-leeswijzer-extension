@@ -91,7 +91,7 @@ er 500 per 10 seconden toe en blokkeert daarna 10 seconden. Eén lezer die een E
 arrest van 101 punten koud opent, kwam in de meting op hoogstens ~150 verzoeken per 10
 seconden (preflights worden door de browser gecachet, `Access-Control-Max-Age`), dus drie
 zware lezers achter één kantooradres passen eronder. De limieten in de Worker zelf (per
-client 300 beoordelingen per 10 s en 900 per minuut, apart 600/1800 cache-opzoekingen;
+client 500 beoordelingen per 10 s en 900 per minuut, apart 600/1800 cache-opzoekingen;
 wereldwijd 3000 Jev-aanroepen per minuut en 80.000 per dag) en hoe ze gemeten zijn, staan
 bij "Rate limiting" in `worker/src/index.js`. Een client is één IPv4-adres of één IPv6-/64:
 een heel kantoor achter één NAT-adres is één client, daarom zijn de limieten ruim genoeg

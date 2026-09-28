@@ -502,11 +502,14 @@ function storeAnswer(env, ctx, slot, answers, replace) {
 //     60 s. This is an upper bound: the test browser (Playwright) reports every
 //     tab as visible, so all 25 tabs read at once; in Chrome, background tabs
 //     wait until they are viewed.
-// CALLS allows about twice the worst 10 s and 1.7 times the worst minute of
-// that upper bound for one reader, so two or three lawyers behind one office
-// address can each open a cold 101-punt ruling in the same minute without a
-// 429. Lower than before (1,200/min), and lookups have their own budget
-// (ITEMS), so reading from the cache no longer eats into the Jev budget.
+// Office NAT: several lawyers behind one address are one client. Three of them
+// opening a cold 101-punt ruling within the same 10 s send ~387 judge calls
+// (a reviewer's simulation got 93 of 387 refused at 300/10 s), so the 10 s
+// window is 500, the same as the zone's WAF rule (500 requests per IP per
+// 10 s), and the minute stays at 900: 1.7 times the worst single-reader
+// minute measured (the all-tabs upper bound), ~7 cold 101-punt rulings a
+// minute. Lower than before per minute (1,200), and lookups have their own
+// budget (ITEMS), so reading from the cache does not eat into the Jev budget.
 // What one client can still do: 900 Jev calls/min, so a single address at the
 // cap could use up the Free plan's 100,000 Workers requests in about 111
 // minutes; the zone WAF rule and the global daily cap are the backstops, and
@@ -524,7 +527,7 @@ function storeAnswer(env, ctx, slot, answers, replace) {
 // So on the Free plan the Workers requests (100,000/day, ~140 per cold
 // 101-punt ruling including preflights) bind before Durable Objects do.
 const CALLS = [
-  { limit: 300, ms: 10_000 },
+  { limit: 500, ms: 10_000 },
   { limit: 900, ms: 60_000 },
 ];
 // Lookup items (D1 reads, never Jev): a warm 101-punt ruling looks up 101 core
@@ -541,9 +544,9 @@ const LEGACY_CALLS = [
   { limit: 600, ms: 60_000 },
 ];
 // The isolate's token bucket for API requests of one client key: the same
-// budget as CALLS (300 at once, 900/min), so it never refuses what the
+// budget as CALLS (500 at once, 900/min), so it never refuses what the
 // Durable Object would allow.
-const buckets = new TokenBuckets({ capacity: 300, perSecond: 15 });
+const buckets = new TokenBuckets({ capacity: 500, perSecond: 15 });
 const refused = new RefusedClients();
 const leases = new Leases();
 

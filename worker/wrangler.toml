@@ -22,7 +22,7 @@ enabled = false
 ALLOWED_ORIGINS = "chrome-extension://djlkngghkpadabjgmegaeelmffhhljfe,chrome-extension://bobkkcopddkeckpomcpfdnocgkkihiep"
 
 # Rate limits (see "Rate limiting" in src/index.js): exact in-memory counters
-# in a Durable Object per client (judge calls 300/10 s and 900/min, lookup
+# in a Durable Object per client (judge calls 500/10 s and 900/min, lookup
 # items 600/10 s and 1800/min), with free in-isolate checks in front; globally
 # 3000 Jev calls/min and 80000/day, reported by each isolate at most every 10 s.
 # The global Limiter also keeps the anonymous daily counters (src/stats.js) in
