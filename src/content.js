@@ -208,6 +208,7 @@
     let stopped = false;
 
     for (const seg of S.segments) seg.result = null;
+    ctx.sentencePrefetch = null;
     ctx.forcedOpen.clear();
     ctx.jumped = false;
     ctx.userScrolled = false;
@@ -246,8 +247,38 @@
       },
     );
 
+    const resultOf = (seg, answers) => ({
+      ...(core ? MNT.readCoreAnswers(answers) : MNT.readSegmentAnswers(answers)),
+      summary: MNT.SUMMARY_SECTION.test(seg.section),
+      ...(lang ? { eu: true } : {}),
+    });
+
+    // Without a question the answers may already be in the shared cache: one
+    // lookup for every r.o., the hits shown at once, then only the rest judged
+    // one by one. With a question nothing is cached, so no lookup.
+    let todo = S.segments;
+    if (core) {
+      const { answers: cached, session } = await MNT.lookup("core", court, lang, S.segments.map((seg) => ({ state: MNT.segmentState(ctx.meta, seg) })));
+      if (cancelled()) return;
+      const hits = S.segments.filter((seg, i) => cached[i]);
+      // As with judge calls: only this session's own cache counts as "cached".
+      allCached &&= cached.every((a, i) => !a || session[i]);
+      if (hits.length) {
+        S.segments.forEach((seg, i) => {
+          if (cached[i]) seg.result = resultOf(seg, cached[i]);
+        });
+        S.progress.done += hits.length;
+        applyAll();
+        prefetchSentences(hits);
+        for (const seg of hits) watchSentences(seg);
+        maybeJumpToFirst();
+        schedule();
+      }
+      todo = S.segments.filter((seg) => !seg.result);
+    }
+
     await MNT.pool(
-      S.segments,
+      todo,
       async (seg) => {
         try {
           const d = core
@@ -255,8 +286,7 @@
             : await MNT.evaluate("segment", question, MNT.segmentState(ctx.meta, seg), undefined, site.speakerInQuestion ? court : undefined, lang);
           if (cancelled()) return;
           allCached &&= d.cached;
-          const read = core ? MNT.readCoreAnswers(d.answers) : MNT.readSegmentAnswers(d.answers);
-          seg.result = { ...read, summary: MNT.SUMMARY_SECTION.test(seg.section), ...(lang ? { eu: true } : {}) };
+          seg.result = resultOf(seg, d.answers);
         } catch (err) {
           if (cancelled()) return;
           seg.result = { error: err.message };
@@ -322,15 +352,30 @@
   function watchSentences(seg) {
     if (isRelevant(seg) && !seg.sentencesAsked) sentenceObserver.observe(seg.wraps[0]);
   }
-  async function loadSentences(seg) {
-    if (seg.sentencesAsked || !isRelevant(seg)) return;
-    seg.sentencesAsked = true;
+  function sentencesOf(seg) {
     let text = seg.text.replace(/^(?:r\.?\s?o\.?\s*)?\d{1,2}(?:\.\d{1,3}){0,4}\.?\s+/i, "");
     // An opinion's footnote markers "(20)" are not part of a sentence.
     if (site.footnotes) text = text.replace(site.footnotes, "");
-    const sentences = MNT.splitSentences(text);
+    return MNT.splitSentences(text);
+  }
+  // Without a question, the sentence picks of the relevant r.o.'s that came
+  // from the shared cache are probably cached too: one lookup fills the
+  // session cache before they scroll into view (loadSentences waits for it).
+  function prefetchSentences(segs) {
+    if (S.question) return;
+    const items = segs.filter(isRelevant).map((seg) => ({ seg, sentences: sentencesOf(seg) })).filter((x) => x.sentences.length >= 2);
+    if (!items.length) return;
+    const lang = site.euLang?.(ctx.meta);
+    ctx.sentencePrefetch = MNT.lookup("sentences", undefined, lang, items.map((x) => ({ state: MNT.sentenceState(ctx.meta, x.seg, ""), sentences: x.sentences })));
+  }
+  async function loadSentences(seg) {
+    if (seg.sentencesAsked || !isRelevant(seg)) return;
+    seg.sentencesAsked = true;
+    const sentences = sentencesOf(seg);
     if (sentences.length < 2) return;
     const id = ctx.runId;
+    await ctx.sentencePrefetch;
+    if (id !== ctx.runId) return;
     try {
       const d = await MNT.evaluate("sentences", S.question, MNT.sentenceState(ctx.meta, seg, S.question), sentences, undefined, site.euLang?.(ctx.meta));
       if (id !== ctx.runId) return;

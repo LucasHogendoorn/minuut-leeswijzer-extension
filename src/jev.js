@@ -60,6 +60,17 @@ MNT.evaluate = async (kind, question, state, sentences, court, lang) => {
   return res.data;
 };
 
+// The shared cache's answers for many passages of one ruling at once, asked
+// without a question: `kind` is "core" or "sentences", `items` are
+// { state, sentences? }. Resolves to { answers, session }: per item the
+// answers or null where nothing is cached, and whether they came from this
+// browser session's own cache. Never rejects (no answers: judge as usual).
+MNT.lookup = async (kind, court, lang, items) => {
+  const res = await chrome.runtime.sendMessage({ type: "jev:lookup", request: { kind, court, lang, items } }).catch(() => null);
+  const ok = res?.ok && Array.isArray(res.answers) && res.answers.length === items.length;
+  return ok ? { answers: res.answers, session: res.session ?? [] } : { answers: items.map(() => null), session: [] };
+};
+
 // Read Jev's answers defensively: only known categories, numbers in range.
 const unit = (MNT.unit = (v) => (typeof v === "number" && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0));
 MNT.readSegmentAnswers = (answers) => {

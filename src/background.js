@@ -121,19 +121,23 @@ async function callJev(body) {
 
 const KINDS = new Set(["core", "segment", "ruling", "sentences"]);
 
+// The body of one judge call; its hash is also the session-cache key, so a
+// lookup (below) fills the same entries a judge call would.
+const judgeBody = ({ kind, question, state, sentences, court, lang }) => ({
+  kind,
+  question,
+  state,
+  ...(Array.isArray(sentences) ? { sentences } : {}),
+  ...(typeof court === "string" ? { court } : {}),
+  ...(lang === "nl" || lang === "en" ? { lang } : {}),
+});
+
 async function evaluate(request) {
-  const { kind, question, state, sentences, court, lang } = request ?? {};
+  const { kind, question, state } = request ?? {};
   if (!KINDS.has(kind) || typeof question !== "string" || typeof state !== "string") {
     throw new JevError("request", "Onverwacht verzoek.");
   }
-  const body = {
-    kind,
-    question,
-    state,
-    ...(Array.isArray(sentences) ? { sentences } : {}),
-    ...(typeof court === "string" ? { court } : {}),
-    ...(lang === "nl" || lang === "en" ? { lang } : {}),
-  };
+  const body = judgeBody(request);
   const key = CACHE_PREFIX + (await sha256(JSON.stringify(body)));
   const cached = (await chrome.storage.session.get(key))[key];
   if (cached) return { answers: cached, cached: true };
@@ -145,12 +149,85 @@ async function evaluate(request) {
   return { answers, cached: false };
 }
 
+// ---- Lookup: many cached answers at once ------------------------------------------------
+// Before judging a ruling without a question, one request asks the Worker's
+// shared cache for all its r.o.'s (POST /v1/lookup); only the misses are then
+// judged one by one. The Worker's lookup never calls Jev. Answers come back in
+// order, null where nothing is cached; hits also go into the session cache.
+// `session` says per item whether it came from this session's own cache (as
+// `cached` does for a judge call).
+// Any failure (offline, 429, an older Worker without /v1/lookup) just means
+// "nothing cached": the r.o.'s are judged as before.
+const LOOKUP_ITEMS = 100; // the Worker's limit per request
+const LOOKUP_BYTES = 400_000; // below the Worker's 512 KB body limit
+
+async function lookupChunk(kind, court, lang, items) {
+  const url = (await endpoint()).replace(/\/v1\/judge$/, "/v1/lookup");
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind, ...(court ? { court } : {}), ...(lang ? { lang } : {}), items }),
+  });
+  if (!res.ok) throw new JevError("lookup", `De server antwoordde ${res.status}.`);
+  const answers = (await res.json())?.answers;
+  return Array.isArray(answers) && answers.length === items.length ? answers : items.map(() => null);
+}
+
+async function lookup(request) {
+  const { kind, court, lang, items } = request ?? {};
+  if ((kind !== "core" && kind !== "sentences") || !Array.isArray(items)) throw new JevError("request", "Onverwacht verzoek.");
+  const bodies = items.map((item) => judgeBody({ kind, question: "", state: item?.state, sentences: item?.sentences, court, lang }));
+  const keys = await Promise.all(bodies.map((b) => sha256(JSON.stringify(b)).then((h) => CACHE_PREFIX + h)));
+  const session = await chrome.storage.session.get(keys);
+  const out = keys.map((k) => session[k] ?? null);
+  const fromSession = out.map(Boolean);
+  // What this session does not have yet goes to the Worker, in chunks.
+  const chunks = [];
+  let chunk = [];
+  let bytes = 0;
+  for (const [i, b] of bodies.entries()) {
+    if (out[i] || typeof b.state !== "string") continue;
+    const item = { state: b.state, ...(b.sentences ? { sentences: b.sentences } : {}) };
+    const size = JSON.stringify(item).length;
+    if (chunk.length && (chunk.length >= LOOKUP_ITEMS || bytes + size > LOOKUP_BYTES)) {
+      chunks.push(chunk);
+      chunk = [];
+      bytes = 0;
+    }
+    chunk.push({ i, item });
+    bytes += size;
+  }
+  if (chunk.length) chunks.push(chunk);
+  await Promise.all(
+    chunks.map(async (c) => {
+      const answers = await lookupChunk(kind, court, lang, c.map((x) => x.item)).catch(() => []);
+      const fresh = {};
+      c.forEach((x, j) => {
+        const a = answers[j];
+        if (a && typeof a === "object" && !Array.isArray(a)) {
+          out[x.i] = a;
+          fresh[keys[x.i]] = a;
+        }
+      });
+      if (Object.keys(fresh).length) await chrome.storage.session.set(fresh).catch(() => {});
+    }),
+  );
+  return { answers: out, session: fromSession };
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Only this extension's own content scripts and pages may ask anything.
   if (sender.id !== chrome.runtime.id) return false;
   if (msg?.type === "jev:evaluate") {
     evaluate(msg.request).then(
       (data) => sendResponse({ ok: true, data }),
+      (err) => sendResponse({ ok: false, error: { code: err.code ?? "unknown", message: err.message } }),
+    );
+    return true;
+  }
+  if (msg?.type === "jev:lookup") {
+    lookup(msg.request).then(
+      (data) => sendResponse({ ok: true, ...data }),
       (err) => sendResponse({ ok: false, error: { code: err.code ?? "unknown", message: err.message } }),
     );
     return true;
