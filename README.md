@@ -59,7 +59,7 @@ gebruikt.
 - **Je vraag wordt niet bewaard.** De server van Minuut geeft een verzoek door aan het
   AI-model en slaat geen vragen, IP-adressen of gebruik op.
 - **Alleen oordelen over openbare tekst.** Zonder rechtsvraag bewaart de server wat het
-  model van een openbare uitspraak vond (90 dagen), zodat de volgende lezer niet opnieuw
+  model van een openbare uitspraak vond (180 dagen), zodat de volgende lezer niet opnieuw
   hoeft te wachten en het model niet opnieuw hoeft te lezen. Niets daarvan is terug te
   voeren op wie de uitspraak opende.
 - **Zero data retention bij het model.** De inhoud wordt niet bewaard en niet gebruikt om

@@ -17,7 +17,7 @@ Er is geen build-stap en er zijn geen dependencies: het is gewone JavaScript en 
 De AI-aanroepen lopen via een Cloudflare Worker (`worker/`). Die houdt de API-sleutel,
 bouwt de vragen aan het AI-model uit vaste sjablonen (`QUESTIONS` in
 `worker/src/index.js`), begrenst het aantal verzoeken en bewaart alleen oordelen over
-openbare tekst die zonder rechtsvraag zijn gevraagd (Cloudflare KV, 90 dagen). Lokaal
+openbare tekst die zonder rechtsvraag zijn gevraagd (Cloudflare KV, 180 dagen). Lokaal
 gebruikt `wrangler dev` een eigen, lege opslag.
 
 De productieserver accepteert alleen de officiële extensie. Een uitgepakte installatie uit

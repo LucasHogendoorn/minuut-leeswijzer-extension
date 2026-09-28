@@ -399,7 +399,7 @@ async function readBody(request) {
 // client cannot plant answers for text it did not send. Entries expire so junk
 // text sent by abusers does not pile up.
 
-const CACHE_TTL = 90 * 24 * 60 * 60; // seconds
+const CACHE_TTL = 180 * 24 * 60 * 60; // seconds
 
 async function cacheKey(questions, state) {
   const bytes = new TextEncoder().encode(JSON.stringify({ model: MODEL, questions, state }));
