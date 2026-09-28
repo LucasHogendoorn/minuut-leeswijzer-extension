@@ -23,4 +23,11 @@ class_name = "Limiter"
 tag = "v1"
 new_sqlite_classes = ["Limiter"]
 
+# Shared cache of Jev's answers about public ruling text (calls without a
+# question only; see "Shared cache" in src/index.js). wrangler dev uses a local
+# stand-in; deploying your own Worker needs your own namespace id here.
+[[kv_namespaces]]
+binding = "CACHE"
+id = "7e2daab2a6f94c5c82851497dcbcd99a"
+
 # Secrets, set with: wrangler secret put AI_GATEWAY_API_KEY / wrangler secret put RL_SALT

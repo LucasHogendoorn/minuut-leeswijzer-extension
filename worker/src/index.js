@@ -16,10 +16,13 @@ import { DurableObject } from "cloudflare:workers";
 //   - only browser-extension origins, optionally pinned to the store IDs in
 //     env.ALLOWED_ORIGINS.
 //
-// Privacy: nothing is stored or logged. Every call goes to the gateway with
-// zero data retention forced on, restricted to TypeSafe AI. No request body is
-// written anywhere; `observability` is disabled in wrangler.toml. Responses carry
+// Privacy: the lawyer's question, the IP and usage are never stored or logged.
+// Every call goes to the gateway with zero data retention forced on, restricted
+// to TypeSafe AI; `observability` is disabled in wrangler.toml. Responses carry
 // only Jev's answers, never usage, routing, cost or upstream error bodies.
+// One exception, by design: calls WITHOUT a question are about public ruling
+// text only, so Jev's answer to those is kept in KV (see "Shared cache") and
+// served to the next reader of the same ruling instead of asking Jev again.
 
 const GATEWAY = "https://ai-gateway.vercel.sh/v1/evaluate";
 const MODEL = "typesafe-ai/jev";
@@ -388,6 +391,22 @@ async function readBody(request) {
   }
 }
 
+// ---- Shared cache: answers about public text only ------------------------------------
+// Only calls without a question are cached: their input is the public ruling text
+// and the Worker's own template, nothing the user typed. The key hashes exactly
+// what goes to Jev (model, built questions, state), so any template change starts
+// a fresh cache by itself. Only answers the Worker got from Jev are written, so a
+// client cannot plant answers for text it did not send. Entries expire so junk
+// text sent by abusers does not pile up.
+
+const CACHE_TTL = 90 * 24 * 60 * 60; // seconds
+
+async function cacheKey(questions, state) {
+  const bytes = new TextEncoder().encode(JSON.stringify({ model: MODEL, questions, state }));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return `v1:${[...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
 // ---- Rate limiting: exact counters in Durable Objects --------------------------------
 // Cloudflare's rate-limit binding counts per location and approximately (tested:
 // 400 rapid calls, none refused), so the hard caps live in Durable Objects: one
@@ -431,7 +450,7 @@ async function rateLimited(env, ip) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const origin = allowedOrigin(request, env);
 
@@ -455,6 +474,14 @@ export default {
     if (typeof built === "string") return fail(400, built, "invalid_request", origin);
     const [questions, state] = built;
 
+    // A cache miss or a KV hiccup just means asking Jev; it never fails the call.
+    const cacheable = Boolean(env.CACHE) && !(body.question ?? "").trim();
+    const key = cacheable ? await cacheKey(questions, state) : null;
+    if (key) {
+      const hit = await env.CACHE.get(key, "json").catch(() => null);
+      if (hit) return json(200, { answers: hit }, origin);
+    }
+
     let upstream;
     try {
       upstream = await fetch(GATEWAY, {
@@ -476,6 +503,10 @@ export default {
       return fail(busy ? 429 : 502, "Jev is even niet bereikbaar.", busy ? "busy" : "upstream", origin, busy ? { "Retry-After": "1" } : {});
     }
     const data = await upstream.json().catch(() => ({}));
-    return json(200, { answers: data.answers ?? {} }, origin);
+    const answers = data.answers ?? {};
+    if (key && Object.keys(answers).length) {
+      ctx.waitUntil(env.CACHE.put(key, JSON.stringify(answers), { expirationTtl: CACHE_TTL }).catch(() => {}));
+    }
+    return json(200, { answers }, origin);
   },
 };
