@@ -231,7 +231,7 @@ MNT.Panel = class {
               <span class="ad-text"><b>Minuut</b> is de grondigste juridische AI van Nederland</span>
               <span class="ad-arrow">${ICON.arrow}</span>
             </a>
-            <div class="privacy">${ICON.lock}<span>Niets bewaard · zero data retention</span></div>
+            <div class="privacy">${ICON.lock}<span>Uw vraag blijft privé · zero data retention</span></div>
           </footer>
         </aside>
       </div>`);

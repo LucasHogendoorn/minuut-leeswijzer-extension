@@ -1,8 +1,9 @@
 // Minuut Leeswijzer: service worker.
 // Every Jev call goes through Minuut's Cloudflare Worker, which holds the key
-// and forces zero data retention. Nothing is stored beyond this browser
-// session: answers are cached in chrome.storage.session, which the browser
-// wipes when it closes.
+// and forces zero data retention. The Worker keeps only answers about public
+// ruling text asked without a question (a shared cache); the question stays in
+// this browser session: answers are cached in chrome.storage.session, which
+// the browser wipes when it closes.
 
 // Minuut's production Worker (worker/; see CONTRIBUTING.md to run your own).
 const PRODUCTION_ENDPOINT = "https://minuut-leeswijzer.lucas-hogendoorn.workers.dev/v1/judge";

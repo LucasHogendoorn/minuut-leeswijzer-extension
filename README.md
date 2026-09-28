@@ -6,7 +6,7 @@
 
 <p align="center">
   Een Chrome-extensie die in elke uitspraak op Rechtspraak.nl, Curia en EUR-Lex meteen de kernoverwegingen laat zien.<br>
-  Gratis, zonder account, niets wordt opgeslagen.
+  Gratis, zonder account, je vraag blijft privé.
 </p>
 
 <p align="center">
@@ -56,8 +56,12 @@ gebruikt.
 
 ## Privacy
 
-- **Niets bewaard op de server.** De server van Minuut geeft een verzoek alleen door aan het
-  AI-model en slaat geen vragen, uitspraken of gebruik op.
+- **Je vraag wordt niet bewaard.** De server van Minuut geeft een verzoek door aan het
+  AI-model en slaat geen vragen, IP-adressen of gebruik op.
+- **Alleen oordelen over openbare tekst.** Zonder rechtsvraag bewaart de server wat het
+  model van een openbare uitspraak vond (90 dagen), zodat de volgende lezer niet opnieuw
+  hoeft te wachten en het model niet opnieuw hoeft te lezen. Niets daarvan is terug te
+  voeren op wie de uitspraak opende.
 - **Zero data retention bij het model.** De inhoud wordt niet bewaard en niet gebruikt om
   modellen te trainen.
 - **Alleen deze browsersessie.** De rechtsvraag en de oordelen verdwijnen als de browser
@@ -68,7 +72,7 @@ gebruikt.
 Omdat de code open is, is dit na te lezen. Alles wat de extensie verstuurt, gaat via
 [`src/background.js`](src/background.js). Wat de server ermee doet, staat in
 [`worker/src/index.js`](worker/src/index.js): de vaste vragen aan het AI-model, de limieten,
-zero data retention, en dat er niets wordt opgeslagen of gelogd.
+zero data retention, en dat alleen oordelen over openbare tekst worden bewaard.
 
 ## Meebouwen
 

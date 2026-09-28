@@ -16,7 +16,9 @@ Er is geen build-stap en er zijn geen dependencies: het is gewone JavaScript en 
 
 De AI-aanroepen lopen via een Cloudflare Worker (`worker/`). Die houdt de API-sleutel,
 bouwt de vragen aan het AI-model uit vaste sjablonen (`QUESTIONS` in
-`worker/src/index.js`), begrenst het aantal verzoeken en slaat niets op.
+`worker/src/index.js`), begrenst het aantal verzoeken en bewaart alleen oordelen over
+openbare tekst die zonder rechtsvraag zijn gevraagd (Cloudflare KV, 90 dagen). Lokaal
+gebruikt `wrangler dev` een eigen, lege opslag.
 
 De productieserver accepteert alleen de officiële extensie. Een uitgepakte installatie uit
 je eigen map krijgt een andere extensie-ID en wordt geweigerd. Draai de Worker daarom
@@ -75,13 +77,14 @@ Wie de Worker zelf deployt, zet de secrets met `wrangler secret put AI_GATEWAY_A
 | `src/panel.js`, `src/panel.css` | Het zijpaneel |
 | `src/results.js` | De zoekresultaten |
 | `options/` | Welkomst- en privacypagina |
-| `worker/src/index.js` | De server: vaste vragen aan het AI-model, limieten, doorgeven zonder opslag |
+| `worker/src/index.js` | De server: vaste vragen aan het AI-model, limieten, gedeelde cache voor openbare tekst |
 
 ## Uitgangspunten
 
 - De extensie schrijft geen tekst. Ze verandert alleen kleur, volgorde en zichtbaarheid;
   wat er staat, is altijd de tekst van de rechter.
-- Niets blijft langer bewaard dan de browsersessie, behalve weergavekeuzes.
+- De rechtsvraag blijft in de browsersessie en komt nooit in opslag; de server bewaart alleen
+  oordelen over openbare tekst.
 - De opmaak van Rechtspraak.nl, Curia en EUR-Lex zelf blijft zoveel mogelijk ongemoeid.
 
 ## Pakket bouwen
