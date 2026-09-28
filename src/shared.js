@@ -33,6 +33,15 @@ MNT.tierOf = (r) => {
   if (r.mode === "core") {
     // Kernoverweging = all three factors (tested on a hof ruling and a Hoge Raad
     // arrest); "rel" here means the court's own judgement on the substance.
+    if (r.eu) {
+      // EU case law (tuned on 12 labelled judgments and opinions): the operative
+      // part is always kern, and a party's argument or a recounted finding
+      // never is, however firmly the model rates it as the court's own.
+      if (r.role === "beslissing") return "kern";
+      if (r.own >= 0.6 && r.substance >= 0.5 && r.bearing >= 0.5 && (r.role === "kader" || r.role === "toepassing") && !r.summary) return "kern";
+      if (r.own >= 0.6 && r.substance >= 0.5) return "rel";
+      return "low";
+    }
     if (r.own >= 0.6 && r.substance >= 0.6 && r.bearing >= 0.5 && !r.summary) return "kern";
     if ((r.own >= 0.6 && r.substance >= 0.5) || r.role === "beslissing") return "rel";
     return "low";

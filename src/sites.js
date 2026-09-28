@@ -19,6 +19,13 @@ const isEurlexCaseLaw = () => {
   return /^(celex:6|ecli:ECLI:EU:)/i.test(uri);
 };
 
+// The language of an EU page, for the Worker's EU templates: "nl" or "en".
+// Other languages (FR, DE, ...) get the English templates: the model reads the
+// text in its own language either way, and only NL and EN were tuned.
+const euLang = (meta) => (/^nl$/i.test(meta?.lang ?? "") ? "nl" : "en");
+// Footnote markers in opinions: "(20)", on Curia rendered as "( 20 )".
+const EU_FOOTNOTES = /(?<=\s)\(\s*\d{1,3}\s*\)/g;
+
 const SITES = {
   rechtspraak: {
     id: "rechtspraak",
@@ -60,6 +67,8 @@ const SITES = {
     prioritySection: EU_PRIORITY,
     // An advocate general is not a court: every question names who speaks.
     speakerInQuestion: true,
+    euLang,
+    footnotes: EU_FOOTNOTES,
   },
   eurlex: {
     id: "eurlex",
@@ -80,6 +89,8 @@ const SITES = {
     segment: (root) => MNT.segmentEU(root),
     prioritySection: EU_PRIORITY,
     speakerInQuestion: true,
+    euLang,
+    footnotes: EU_FOOTNOTES,
   },
 };
 

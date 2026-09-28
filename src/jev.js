@@ -52,8 +52,9 @@ class JevCallError extends Error {
 // whole ruling or one search hit against the question) or "sentences" (rank
 // the sentences of one r.o.). The Worker holds the question templates; we send only the lawyer's
 // question and the public text.
-MNT.evaluate = async (kind, question, state, sentences, court) => {
-  const request = { kind, question, state, ...(sentences ? { sentences } : {}), ...(court ? { court } : {}) };
+// `lang` ("nl" | "en") picks the Worker's EU template set; Rechtspraak sends none.
+MNT.evaluate = async (kind, question, state, sentences, court, lang) => {
+  const request = { kind, question, state, ...(sentences ? { sentences } : {}), ...(court ? { court } : {}), ...(lang ? { lang } : {}) };
   const res = await chrome.runtime.sendMessage({ type: "jev:evaluate", request });
   if (!res?.ok) throw new JevCallError(res?.error ?? { code: "unknown", message: "Geen antwoord van de extensie." });
   return res.data;

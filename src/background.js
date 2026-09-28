@@ -70,7 +70,7 @@ async function callJev(body) {
 const KINDS = new Set(["core", "segment", "ruling", "sentences"]);
 
 async function evaluate(request) {
-  const { kind, question, state, sentences, court } = request ?? {};
+  const { kind, question, state, sentences, court, lang } = request ?? {};
   if (!KINDS.has(kind) || typeof question !== "string" || typeof state !== "string") {
     throw new JevError("request", "Onverwacht verzoek.");
   }
@@ -80,6 +80,7 @@ async function evaluate(request) {
     state,
     ...(Array.isArray(sentences) ? { sentences } : {}),
     ...(typeof court === "string" ? { court } : {}),
+    ...(lang === "nl" || lang === "en" ? { lang } : {}),
   };
   const key = CACHE_PREFIX + (await sha256(JSON.stringify(body)));
   const cached = (await chrome.storage.session.get(key))[key];

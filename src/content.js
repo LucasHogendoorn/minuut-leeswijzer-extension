@@ -91,6 +91,8 @@
     ctx.root = root;
     ctx.href = location.href;
     ctx.meta = site.readMeta(root);
+    // An advocate general's opinion is not an "uitspraak" in the panel.
+    S.docNoun = ctx.meta.court === "de advocaat-generaal" ? "conclusie" : "uitspraak";
     ctx.forcedOpen.clear();
     ctx.navAt = -1;
     const segments = site.segment(root);
@@ -203,7 +205,10 @@
 
     const core = !question;
     const court = ctx.meta.court ?? MNT.courtOf(ctx.meta.instantie);
-    const verdictTask = (core ? Promise.resolve(null) : MNT.evaluate("ruling", question, MNT.rulingState(ctx.meta, rulingText()))).then(
+    // EU pages name their language; the Worker then asks its EU questions in
+    // that language. Rechtspraak.nl sends nothing and keeps its own templates.
+    const lang = site.euLang?.(ctx.meta);
+    const verdictTask = (core ? Promise.resolve(null) : MNT.evaluate("ruling", question, MNT.rulingState(ctx.meta, rulingText()), undefined, undefined, lang)).then(
       (d) => {
         if (cancelled()) return;
         if (!d) {
@@ -230,12 +235,12 @@
       async (seg) => {
         try {
           const d = core
-            ? await MNT.evaluate("core", "", MNT.segmentState(ctx.meta, seg), undefined, court)
-            : await MNT.evaluate("segment", question, MNT.segmentState(ctx.meta, seg), undefined, site.speakerInQuestion ? court : undefined);
+            ? await MNT.evaluate("core", "", MNT.segmentState(ctx.meta, seg), undefined, court, lang)
+            : await MNT.evaluate("segment", question, MNT.segmentState(ctx.meta, seg), undefined, site.speakerInQuestion ? court : undefined, lang);
           if (cancelled()) return;
           allCached &&= d.cached;
           const read = core ? MNT.readCoreAnswers(d.answers) : MNT.readSegmentAnswers(d.answers);
-          seg.result = { ...read, summary: MNT.SUMMARY_SECTION.test(seg.section) };
+          seg.result = { ...read, summary: MNT.SUMMARY_SECTION.test(seg.section), ...(lang ? { eu: true } : {}) };
         } catch (err) {
           if (cancelled()) return;
           seg.result = { error: err.message };
@@ -304,11 +309,14 @@
   async function loadSentences(seg) {
     if (seg.sentencesAsked || !isRelevant(seg)) return;
     seg.sentencesAsked = true;
-    const sentences = MNT.splitSentences(seg.text.replace(/^(?:r\.?\s?o\.?\s*)?\d{1,2}(?:\.\d{1,3}){0,4}\.?\s+/i, ""));
+    let text = seg.text.replace(/^(?:r\.?\s?o\.?\s*)?\d{1,2}(?:\.\d{1,3}){0,4}\.?\s+/i, "");
+    // An opinion's footnote markers "(20)" are not part of a sentence.
+    if (site.footnotes) text = text.replace(site.footnotes, "");
+    const sentences = MNT.splitSentences(text);
     if (sentences.length < 2) return;
     const id = ctx.runId;
     try {
-      const d = await MNT.evaluate("sentences", S.question, MNT.sentenceState(ctx.meta, seg, S.question), sentences);
+      const d = await MNT.evaluate("sentences", S.question, MNT.sentenceState(ctx.meta, seg, S.question), sentences, undefined, site.euLang?.(ctx.meta));
       if (id !== ctx.runId) return;
       MNT.markSentences(seg, MNT.pickSentences(d.answers, sentences));
     } catch {

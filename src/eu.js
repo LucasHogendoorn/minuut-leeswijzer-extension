@@ -72,6 +72,14 @@ MNT.celexSpeaker = (celex = "") => {
 
 const lines = (el) => MNT.clean(el?.innerText).split("\n").filter(Boolean);
 
+// The language of the document: Curia's doclang=NL, EUR-Lex's /legal-content/NL/
+// or ?locale=, else the page's html lang. Lower-case ISO code ("nl", "en", "fr").
+MNT.euPageLang = () => {
+  const params = new URLSearchParams(location.search);
+  const fromUrl = params.get("doclang") ?? /\/legal-content\/([A-Za-z]{2})\//.exec(location.pathname)?.[1] ?? params.get("locale");
+  return (fromUrl || document.documentElement.lang || "").slice(0, 2).toLowerCase();
+};
+
 MNT.readCuriaMeta = (root) => {
   // "ARREST VAN HET HOF (Achtste kamer)" / "25 april 2024 (*)", or for an
   // opinion "CONCLUSIE VAN ADVOCAAT-GENERAAL" / "A. RANTOS" / "van 25 april 2024 (1)".
@@ -90,6 +98,7 @@ MNT.readCuriaMeta = (root) => {
     rechtsgebieden: "",
     inhoudsindicatie: MNT.clean(root.querySelector(".C71Indicateur")?.innerText ?? ""),
     court: MNT.euSpeaker(title),
+    lang: MNT.euPageLang(),
   };
 };
 
@@ -118,6 +127,7 @@ MNT.readEurlexMeta = (root) => {
     rechtsgebieden: "",
     inhoudsindicatie: MNT.clean(index?.innerText ?? ""),
     court: celex ? MNT.celexSpeaker(celex) : MNT.euSpeaker(title),
+    lang: MNT.euPageLang(),
   };
 };
 
