@@ -46,64 +46,98 @@ const ROLES = {
 
 // Who is speaking, as named in the core questions. A closed list, so the field
 // cannot carry free text into a question.
-const COURTS = new Set(["de Hoge Raad", "het hof", "de rechtbank", "de kantonrechter", "de voorzieningenrechter", "de Raad van State", "de Centrale Raad van Beroep", "het College", "de rechter"]);
+const COURTS = new Set([
+  "de Hoge Raad", "het hof", "de rechtbank", "de kantonrechter", "de voorzieningenrechter", "de Raad van State", "de Centrale Raad van Beroep", "het College", "de rechter",
+  // EU case law (Curia, EUR-Lex).
+  "het Hof van Justitie", "het Gerecht", "de advocaat-generaal",
+]);
+const EU_COURTS = new Set(["het Hof van Justitie", "het Gerecht"]);
+// An advocate general advises the Court: his own analysis and the answer he
+// proposes take the place of a court's judgement and decision.
+const ADVISER = "de advocaat-generaal";
+
+// "Eigen oordeel" per speaker. The Dutch courts keep their tested wording; the
+// EU courts answer a referring court; the advocate general proposes.
+function ownQuestion(court) {
+  if (court === ADVISER) {
+    return {
+      instructions: `Geeft ${court} in deze passage zijn eigen analyse of oordeel, of formuleert hij zelf een rechtsregel (maatstaf) die hij het Hof voorstelt?`,
+      true: `${court} analyseert, beoordeelt of formuleert in eigen woorden de regel of het antwoord dat hij voorstelt`,
+      false: "alleen feiten, standpunten van partijen, lidstaten of instellingen, de prejudiciële vragen, citaten van wetgeving of rechtspraak, of wat de verwijzende rechter of een lagere rechter heeft overwogen (ook als die redenering hier wordt weergegeven)",
+    };
+  }
+  return {
+    instructions: `Geeft ${court} in deze passage zelf een oordeel of formuleert ${court} zelf een rechtsregel (maatstaf)?`,
+    true: `${court} oordeelt, beslist of formuleert de regel die hij toepast, in eigen woorden`,
+    false: EU_COURTS.has(court)
+      ? "alleen feiten, standpunten of vorderingen van partijen, lidstaten of instellingen, de prejudiciële vragen, middelen of grieven, citaten, of wat de verwijzende rechter of een lagere rechter heeft overwogen of beslist (ook als die redenering hier wordt weergegeven)"
+      : "alleen feiten, standpunten of vorderingen van partijen, klachten of middelen, citaten, of wat een lagere rechter heeft overwogen of beslist (ook als die redenering hier wordt weergegeven)",
+  };
+}
 
 const QUESTIONS = {
   // One rechtsoverweging: does it touch the question, what kind is it, how useful.
   // One rechtsoverweging. Two sharp yes/no questions instead of one broad
   // "does it touch the question" (tested on 28 r.o.'s: the broad version marked
   // party claims and the lower court's ruling as core).
-  segment: (q) => ({
-    onderwerp: {
-      type: "boolean",
-      instructions: `Gaat deze passage over dezelfde juridische kwestie als de rechtsvraag? Rechtsvraag: "${q}"`,
-      criteria: {
-        true: "de passage behandelt precies deze kwestie: de regel die erop van toepassing is, de feiten die voor deze kwestie beslissend zijn, of wat partijen of de rechter daarover zeggen",
-        false: "de passage gaat over een andere kwestie, of alleen over procesverloop, kosten, bevoegdheid of algemene achtergrond, ook als dezelfde partijen of woorden voorkomen",
+  segment: (q, _sentences, speaker) => {
+    // Named only for EU case law, where the speaker may be an advocate general.
+    const court = EU_COURTS.has(speaker) || speaker === ADVISER ? speaker : "de rechter";
+    return {
+      onderwerp: {
+        type: "boolean",
+        instructions: `Gaat deze passage over dezelfde juridische kwestie als de rechtsvraag? Rechtsvraag: "${q}"`,
+        criteria: {
+          true: "de passage behandelt precies deze kwestie: de regel die erop van toepassing is, de feiten die voor deze kwestie beslissend zijn, of wat partijen of de rechter daarover zeggen",
+          false: "de passage gaat over een andere kwestie, of alleen over procesverloop, kosten, bevoegdheid of algemene achtergrond, ook als dezelfde partijen of woorden voorkomen",
+        },
       },
-    },
-    antwoord: {
-      type: "boolean",
-      instructions: `Geeft de rechter in deze passage zelf (een deel van) het antwoord op de rechtsvraag: de maatstaf die hij toepast, of zijn eigen oordeel over precies deze vraag? Rechtsvraag: "${q}"`,
-      criteria: {
-        true: "een eigen oordeel of maatstaf van de rechter die deze rechtsvraag (gedeeltelijk) beantwoordt",
-        false: "alleen feiten, standpunten van partijen, weergave van een lagere rechter, citaten zonder eigen oordeel, of een oordeel over een andere vraag",
+      antwoord: {
+        type: "boolean",
+        instructions: `Geeft ${court} in deze passage zelf (een deel van) het antwoord op de rechtsvraag: de maatstaf die hij toepast, of zijn eigen oordeel over precies deze vraag? Rechtsvraag: "${q}"`,
+        criteria: {
+          true: `een eigen oordeel of maatstaf van ${court} die deze rechtsvraag (gedeeltelijk) beantwoordt`,
+          false: "alleen feiten, standpunten van partijen, weergave van een lagere rechter, citaten zonder eigen oordeel, of een oordeel over een andere vraag",
+        },
       },
-    },
-    rol: { type: "choice", instructions: "Wat voor passage is dit binnen de uitspraak?", criteria: ROLES },
-  }),
+      rol: { type: "choice", instructions: "Wat voor passage is dit binnen de uitspraak?", criteria: ROLES },
+    };
+  },
   // One rechtsoverweging, no question: is this a core consideration of the
   // judgement? Three factors that must all hold (tested on a hof ruling and a
   // Hoge Raad arrest): the court's own judgement or rule, on the substance, on
   // which the outcome rests. `court` names who is speaking, so the lower court's
   // reasoning quoted in an appeal is not mistaken for the court's own.
-  core: (_q, _sentences, court) => ({
-    eigen: {
-      type: "boolean",
-      instructions: `Geeft ${court} in deze passage zelf een oordeel of formuleert ${court} zelf een rechtsregel (maatstaf)?`,
-      criteria: {
-        true: `${court} oordeelt, beslist of formuleert de regel die hij toepast, in eigen woorden`,
-        false: "alleen feiten, standpunten of vorderingen van partijen, klachten of middelen, citaten, of wat een lagere rechter heeft overwogen of beslist (ook als die redenering hier wordt weergegeven)",
+  core: (_q, _sentences, court) => {
+    const own = ownQuestion(court);
+    const adviser = court === ADVISER;
+    return {
+      eigen: {
+        type: "boolean",
+        instructions: own.instructions,
+        criteria: { true: own.true, false: own.false },
       },
-    },
-    dragend: {
-      type: "boolean",
-      instructions: "Draagt deze passage de beslissing: formuleert zij de maatstaf waarop de uitkomst berust, of past zij die maatstaf toe op deze zaak?",
-      criteria: {
-        true: "de uitkomst rust op deze maatstaf of op deze toepassing ervan (ratio decidendi)",
-        false: "ten overvloede, terzijde, achtergrond, samenvatting, of alleen de slotsom zonder redenering",
+      dragend: {
+        type: "boolean",
+        instructions: adviser
+          ? "Draagt deze passage het antwoord dat de advocaat-generaal voorstelt: formuleert zij de maatstaf waarop dat antwoord berust, of past zij die maatstaf toe op deze zaak?"
+          : "Draagt deze passage de beslissing: formuleert zij de maatstaf waarop de uitkomst berust, of past zij die maatstaf toe op deze zaak?",
+        criteria: {
+          true: adviser ? "het voorgestelde antwoord rust op deze maatstaf of op deze toepassing ervan" : "de uitkomst rust op deze maatstaf of op deze toepassing ervan (ratio decidendi)",
+          false: "ten overvloede, terzijde, achtergrond, samenvatting, of alleen de slotsom zonder redenering",
+        },
       },
-    },
-    inhoud: {
-      type: "boolean",
-      instructions: "Gaat deze passage over de inhoud van het geschil: een rechtsregel of de toepassing daarvan op de feiten?",
-      criteria: {
-        true: "materieel: wat het recht is en wat dat voor deze zaak betekent",
-        false: "procedureel: procesverloop, bevoegdheid, ontvankelijkheid, termijnen, bewijslevering als proceshandeling of proceskosten",
+      inhoud: {
+        type: "boolean",
+        instructions: "Gaat deze passage over de inhoud van het geschil: een rechtsregel of de toepassing daarvan op de feiten?",
+        criteria: {
+          true: "materieel: wat het recht is en wat dat voor deze zaak betekent",
+          false: "procedureel: procesverloop, bevoegdheid, ontvankelijkheid, termijnen, bewijslevering als proceshandeling of proceskosten",
+        },
       },
-    },
-    rol: { type: "choice", instructions: "Wat voor passage is dit binnen de uitspraak?", criteria: ROLES },
-  }),
+      rol: { type: "choice", instructions: "Wat voor passage is dit binnen de uitspraak?", criteria: ROLES },
+    };
+  },
   // A whole ruling or one search hit: is this about the question?
   ruling: (q) => ({
     over: {

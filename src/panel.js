@@ -351,7 +351,7 @@ MNT.Panel = class {
   renderStatus(s) {
     const el = this.$(".status-text");
     const wrap = this.$(".hd-status");
-    const noun = s.mode === "results" ? "resultaten" : "r.o.'s";
+    const noun = s.mode === "results" ? "resultaten" : MNT.site.terms.many;
     let key = "idle";
     let text = "Klaar om mee te lezen";
     if (s.notice) {
@@ -437,12 +437,12 @@ MNT.Panel = class {
       {
         idle: `<div class="intro reveal">
             <div class="intro-hero">${MNT.mascot(64)}</div>
-            <p class="intro-lead r1">Zoek of open een uitspraak op Rechtspraak.nl.</p>
-            <p class="r2">In elke uitspraak ziet u meteen de kernoverwegingen. Met een rechtsvraag ziet u ook in de zoekresultaten welke uitspraken erover gaan.</p>
+            <p class="intro-lead r1">${MNT.esc(MNT.site.copy.idleLead)}</p>
+            <p class="r2">${MNT.esc(MNT.site.copy.idleText)}</p>
           </div>`,
-        empty: `<div class="intro reveal"><p class="intro-lead r1">Deze pagina heeft geen uitspraaktekst.</p><p class="r2">Rechtspraak.nl toont hier alleen de gegevens van de uitspraak.</p></div>`,
+        empty: `<div class="intro reveal"><p class="intro-lead r1">Deze pagina heeft geen uitspraaktekst.</p><p class="r2">${MNT.esc(MNT.site.copy.empty)}</p></div>`,
         intro: `<div class="intro reveal">
-            <p class="intro-lead r1"><span class="intro-count num"></span> rechtsoverwegingen gevonden.</p>
+            <p class="intro-lead r1"><span class="intro-count num"></span> ${MNT.site.terms.plural} gevonden.</p>
             <p class="r2">Leeswijzer zoekt de kernoverwegingen: waar de rechter zelf oordeelt over de inhoud en waar de beslissing op rust. De rest wordt verborgen. Met een rechtsvraag ziet u wat daarover gaat.</p>
           </div>`,
         "results-intro": `<div class="empty-state reveal">
@@ -456,7 +456,7 @@ MNT.Panel = class {
               <span class="v-line swap"></span>
             </section>
             <div class="v-meta"><span class="num m-kern"></span> kernoverwegingen · <span class="num m-rel"></span> <span class="m-rel-label">raken uw vraag</span> · <span class="num m-all"></span> gelezen</div>
-            <div class="ctl-row"><span class="ctl-label">Niet relevant</span>${tabsHtml("low-mode", MNT.LOW_MODES, "Niet-relevante r.o.'s")}</div>
+            <div class="ctl-row"><span class="ctl-label">Niet relevant</span>${tabsHtml("low-mode", MNT.LOW_MODES, `Niet-relevante ${MNT.site.terms.many}`)}</div>
             <div class="cats">${MNT.ROLES.map((r) => `<button type="button" class="cat cat-${r.key} is-btn" data-act="filter" data-role="${r.key}" aria-pressed="false" hidden>${r.label}<span class="num"></span></button>`).join("")}</div>
             <div class="defaults"></div>
             <div class="list-head"><span>Overwegingen</span>${tabsHtml("sort", [{ key: "rank", label: "Relevantie" }, { key: "doc", label: "Volgorde" }], "Volgorde")}</div>

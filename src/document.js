@@ -35,7 +35,7 @@ MNT.renderSegment = (seg, view) => {
   }
 
   const cat = judged ? MNT.ROLE_LABEL[result.role] ?? result.role : null;
-  const nrLabel = seg.nr ? `r.o. ${seg.nr}` : seg.section || "Passage";
+  const nrLabel = seg.nr ? `${MNT.site.terms.short} ${seg.nr}` : seg.section || "Passage";
 
   const skip = view.skip;
   const showFold = mode === "fold" || forcedOpen || Boolean(skip);

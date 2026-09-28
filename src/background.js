@@ -123,14 +123,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return false;
 });
 
-// Toolbar button: toggle the panel on Rechtspraak.nl, otherwise open Rechtspraak.nl.
+// The pages the content script runs on (manifest.json).
+const READ_PAGES = ["https://uitspraken.rechtspraak.nl/", "https://infocuria.curia.europa.eu/", "https://eur-lex.europa.eu/legal-content/"];
+
+// Toolbar button: toggle the panel where Leeswijzer reads, otherwise open Rechtspraak.nl.
 chrome.action.onClicked.addListener(async (tab) => {
-  if (tab.id && tab.url?.startsWith("https://uitspraken.rechtspraak.nl/")) {
+  if (tab.id && READ_PAGES.some((page) => tab.url?.startsWith(page))) {
     try {
       await chrome.tabs.sendMessage(tab.id, { type: "toggle-panel" });
       return;
     } catch {
-      // Content script not yet injected (tab opened before install): fall through.
+      // Content script not yet injected (tab opened before install), or an
+      // EUR-Lex page that is not case law: fall through.
     }
   }
   chrome.tabs.create({ url: "https://uitspraken.rechtspraak.nl/" });

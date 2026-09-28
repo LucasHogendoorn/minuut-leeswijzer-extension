@@ -22,7 +22,7 @@ MNT.segmentState = (meta, seg) =>
   [
     `Uitspraak: ${meta.ecli}${meta.instantie ? ` (${meta.instantie}${meta.datum ? `, ${meta.datum}` : ""})` : ""}`,
     seg.section ? `Onderdeel: ${seg.section}` : null,
-    seg.nr ? `Rechtsoverweging ${seg.nr}:` : "Passage:",
+    seg.nr ? `${MNT.site.terms.noun} ${seg.nr}:` : "Passage:",
     clip(seg.text, MAX_SEGMENT_CHARS),
   ]
     .filter(Boolean)
@@ -135,7 +135,7 @@ MNT.splitSentences = (text) => {
 };
 
 MNT.sentenceState = (meta, seg, question) =>
-  `${question ? `Rechtsvraag van de advocaat: ${question}\n` : ""}De zinnen hieronder komen uit ${seg.nr ? `rechtsoverweging ${seg.nr}` : "een passage"} van ${meta.ecli}.`;
+  `${question ? `Rechtsvraag van de advocaat: ${question}\n` : ""}De zinnen hieronder komen uit ${seg.nr ? `${MNT.site.terms.noun.toLowerCase()} ${seg.nr}` : "een passage"} van ${meta.ecli}.`;
 
 // Keep the sentence Jev picked, plus any that still carry real weight.
 MNT.pickSentences = (answers, sentences) => {

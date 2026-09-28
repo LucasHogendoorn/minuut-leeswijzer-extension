@@ -1,13 +1,16 @@
-// Minuut Leeswijzer: controller. Watches Rechtspraak.nl (a single-page app),
-// segments each ruling, asks Jev about every segment or search hit, and keeps
-// the panel, the ruling and the result list in step with one state object.
+// Minuut Leeswijzer: controller. Watches the page (Rechtspraak.nl and Curia are
+// single-page apps), segments each ruling, asks Jev about every segment or
+// search hit, and keeps the panel, the ruling and the result list in step with
+// one state object. What differs per site lives in src/sites.js.
 
 (() => {
   const MNT = globalThis.MNT;
+  const site = MNT.site;
+  // EUR-Lex also holds legislation: stay out of everything but case law.
+  if (!site.active()) return;
   const TICK_MS = 600;
   const RECENT_MAX = 5;
   const HIT_BATCH = 50;
-  const PRIORITY_SECTION = /beoordel|overweg|motiver|beslis|conclusie|middel|grief/i;
 
   const S = {
     open: true,
@@ -87,10 +90,10 @@
     ctx.runId++;
     ctx.root = root;
     ctx.href = location.href;
-    ctx.meta = MNT.readMeta();
+    ctx.meta = site.readMeta(root);
     ctx.forcedOpen.clear();
     ctx.navAt = -1;
-    const segments = MNT.segmentRuling(root);
+    const segments = site.segment(root);
     for (const seg of segments) {
       MNT.wrapSegment(seg);
       MNT.decorateSegment(seg, toggleFold);
@@ -173,7 +176,7 @@
 
   function rulingText() {
     const ordered = [...S.segments].sort(
-      (a, b) => Number(PRIORITY_SECTION.test(b.section)) - Number(PRIORITY_SECTION.test(a.section)) || a.id - b.id,
+      (a, b) => Number(site.prioritySection.test(b.section)) - Number(site.prioritySection.test(a.section)) || a.id - b.id,
     );
     return ordered.map((s) => (s.nr ? `${s.nr} ${s.text}` : s.text)).join("\n\n");
   }
@@ -199,7 +202,7 @@
     schedule();
 
     const core = !question;
-    const court = MNT.courtOf(ctx.meta.instantie);
+    const court = ctx.meta.court ?? MNT.courtOf(ctx.meta.instantie);
     const verdictTask = (core ? Promise.resolve(null) : MNT.evaluate("ruling", question, MNT.rulingState(ctx.meta, rulingText()))).then(
       (d) => {
         if (cancelled()) return;
@@ -228,7 +231,7 @@
         try {
           const d = core
             ? await MNT.evaluate("core", "", MNT.segmentState(ctx.meta, seg), undefined, court)
-            : await MNT.evaluate("segment", question, MNT.segmentState(ctx.meta, seg));
+            : await MNT.evaluate("segment", question, MNT.segmentState(ctx.meta, seg), undefined, site.speakerInQuestion ? court : undefined);
           if (cancelled()) return;
           allCached &&= d.cached;
           const read = core ? MNT.readCoreAnswers(d.answers) : MNT.readSegmentAnswers(d.answers);
@@ -346,7 +349,7 @@
     const m = ctx.meta;
     const head = `${m.ecli}${m.instantie ? ` (${m.instantie}${m.datum ? `, ${m.datum}` : ""})` : ""}`;
     const body = (seg) => seg.text.replace(/^(?:r\.?\s?o\.?\s*)?\d{1,2}(?:\.\d{1,3}){0,4}\.?\s+/i, "");
-    const label = (seg) => (seg.nr ? `r.o. ${seg.nr}` : seg.section || "Passage");
+    const label = (seg) => (seg.nr ? `${site.terms.short} ${seg.nr}` : seg.section || "Passage");
     const plain = [head, ...marked.map((s) => `${label(s)}\n${body(s)}`)].join("\n\n");
     const html = `<p><strong>${MNT.esc(head)}</strong></p>${marked
       .map((s) => `<p><strong>${MNT.esc(label(s))}</strong></p>${body(s).split("\n").map((l) => `<p>${MNT.esc(l)}</p>`).join("")}`)
@@ -485,15 +488,14 @@
   }
 
   function tick() {
-    const path = location.pathname;
-    if (path.startsWith("/details")) {
-      const root = MNT.findRulingRoot();
+    if (site.isRuling()) {
+      const root = site.findRoot();
       if (root) {
         ctx.emptyTicks = 0;
         const stale = root !== ctx.root || ctx.href !== location.href || (ctx.firstWrap && !root.contains(ctx.firstWrap));
         if (stale) setupRuling(root);
-      } else if (document.querySelector(".rnl-details .rnl-detail")) {
-        // Metadata without text: an unpublished ruling. Wait two ticks to be sure.
+      } else if (site.isTextless()) {
+        // A ruling page without text. Wait two ticks to be sure.
         if (++ctx.emptyTicks >= 2 && S.mode !== "empty") {
           resetRuling();
           S.mode = "empty";
@@ -503,7 +505,7 @@
       return;
     }
     if (S.mode === "ruling" || S.mode === "empty") resetRuling();
-    if (path.startsWith("/resultaat")) {
+    if (site.isResults()) {
       if (S.mode !== "results" || ctx.href !== location.href) {
         S.mode = "results";
         ctx.href = location.href;
@@ -540,7 +542,8 @@
           scanHits();
         }
       } else if (S.mode === "idle") {
-        notify(q ? "Vraag bewaard. Zoek nu op Rechtspraak.nl; de resultaten worden meteen beoordeeld." : "Zonder vraag toont Leeswijzer in elke uitspraak de kernoverwegingen.");
+        const hint = site.id === "rechtspraak" ? "Zoek nu op Rechtspraak.nl; de resultaten worden meteen beoordeeld." : "Open nu een uitspraak.";
+        notify(q ? `Vraag bewaard. ${hint}` : "Zonder vraag toont Leeswijzer in elke uitspraak de kernoverwegingen.");
       }
       schedule();
     },
@@ -675,6 +678,7 @@
     // The strip the page frees for the panel takes the site's own background.
     const pageBg = getComputedStyle(document.querySelector("main") ?? document.body).backgroundColor;
     if (pageBg && pageBg !== "rgba(0, 0, 0, 0)") document.documentElement.style.setProperty("--mnt-page-bg", pageBg);
+    document.documentElement.classList.add(`mnt-site-${site.id}`);
     panel.mount();
     schedule();
     tick();

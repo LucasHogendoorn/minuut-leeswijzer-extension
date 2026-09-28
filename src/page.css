@@ -28,7 +28,8 @@
   html.mnt-panel-open {
     background: var(--mnt-page-bg, #f1f1f1);
   }
-  html.mnt-panel-open body {
+  /* Direct child: Curia renders its document into a <body> of its own. */
+  html.mnt-panel-open > body {
     margin-right: var(--mnt-panel-width) !important;
   }
 }
@@ -78,6 +79,14 @@
   transition:
     opacity var(--mnt-duration-medium) var(--mnt-ease),
     filter var(--mnt-duration-medium) var(--mnt-ease);
+}
+
+/* Curia and EUR-Lex set the paragraph number inside the text, so there is no
+   gutter to reach into; the wash stays close to the text. */
+html.mnt-site-curia .mnt-seg,
+html.mnt-site-eurlex .mnt-seg {
+  --mnt-gutter: 0px;
+  --mnt-reach: 0px;
 }
 
 /* Space between two washed r.o.'s so each reads as its own block. */

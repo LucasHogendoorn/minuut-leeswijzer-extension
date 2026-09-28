@@ -5,7 +5,7 @@
 <h1 align="center">Minuut Leeswijzer</h1>
 
 <p align="center">
-  Een Chrome-extensie die in elke uitspraak op Rechtspraak.nl meteen de kernoverwegingen laat zien.<br>
+  Een Chrome-extensie die in elke uitspraak op Rechtspraak.nl, Curia en EUR-Lex meteen de kernoverwegingen laat zien.<br>
   Gratis, zonder account, niets wordt opgeslagen.
 </p>
 
@@ -35,7 +35,11 @@ uitspraak zien of die erover gaat, en in welke overwegingen de rechter de vraag 
 
 <p align="center"><img src="docs/rechtsvraag.png" alt="Leeswijzer beoordeelt of een uitspraak een rechtsvraag beantwoordt" width="85%"></p>
 
-**Van 50 zoekresultaten naar de paar die tellen.** Zoek zoals altijd. Leeswijzer beoordeelt
+**Ook Europese rechtspraak.** Arresten en beschikkingen van het Hof van Justitie en het
+Gerecht en conclusies van advocaten-generaal, op Curia en EUR-Lex, in elke taal van de EU.
+Leeswijzer leest de genummerde punten zoals de overwegingen van een Nederlandse uitspraak.
+
+**Van 50 zoekresultaten naar de paar die tellen.** Zoek zoals altijd op Rechtspraak.nl. Leeswijzer beoordeelt
 de eerste 50 resultaten met ja, deels of nee, zet ze op volgorde en opent de beste 3, 10 of
 25 in één keer.
 

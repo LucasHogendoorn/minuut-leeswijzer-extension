@@ -8,7 +8,7 @@ een uitspraak waarin de r.o.'s verkeerd worden herkend, of een idee.
 1. Ga naar `chrome://extensions`, zet **Ontwikkelaarsmodus** aan en kies
    **Uitgepakte extensie laden** → deze map.
 2. Na een wijziging: klik op het herlaadpijltje bij Minuut Leeswijzer en ververs de pagina
-   op Rechtspraak.nl.
+   op Rechtspraak.nl, Curia of EUR-Lex.
 
 Er is geen build-stap en er zijn geen dependencies: het is gewone JavaScript en CSS.
 
@@ -55,7 +55,8 @@ Wie de Worker zelf deployt, zet de secrets met `wrangler secret put AI_GATEWAY_A
 
 - `kind`: `core` (één r.o. zonder vraag: is het een kernoverweging?), `segment` (één r.o.
   tegen de vraag), `ruling` (een uitspraak of zoekresultaat tegen de vraag) of `sentences`
-  (de zinnen van één r.o. rangschikken; dan met `sentences: [...]`). Optioneel: `court`.
+  (de zinnen van één r.o. rangschikken; dan met `sentences: [...]`). Optioneel: `court`, uit
+  een vaste lijst (`COURTS`); bij Europese rechtspraak ook bij `segment`.
 - **Antwoord:** `{ "answers": { … } }`. Hoe de extensie die leest, staat in `src/jev.js`.
 - **Fouten:** een `400` wordt niet herhaald; bij `429` en `5xx` probeert de extensie het tot
   vier keer opnieuw. Een `message`-veld in de JSON wordt de foutmelding.
@@ -66,7 +67,9 @@ Wie de Worker zelf deployt, zet de secrets met `wrangler secret put AI_GATEWAY_A
 |---|---|
 | `src/background.js` | Verbinding met de server, sessie-cache, tabbladen openen |
 | `src/content.js` | Stuurt alles aan op de pagina |
-| `src/segmenter.js` | Herkent de rechtsoverwegingen in een uitspraak |
+| `src/sites.js` | Per site: waar de uitspraak staat, gegevens, hoe punten heten |
+| `src/segmenter.js` | Herkent de rechtsoverwegingen in een uitspraak van Rechtspraak.nl |
+| `src/eu.js` | Herkent de genummerde punten in Europese rechtspraak (Curia, EUR-Lex) |
 | `src/jev.js` | Welke vragen er gesteld worden en hoe de antwoorden gelezen worden |
 | `src/document.js`, `src/page.css` | Kleuren, verbergen en onderstrepen in de uitspraak |
 | `src/panel.js`, `src/panel.css` | Het zijpaneel |
@@ -79,7 +82,7 @@ Wie de Worker zelf deployt, zet de secrets met `wrangler secret put AI_GATEWAY_A
 - De extensie schrijft geen tekst. Ze verandert alleen kleur, volgorde en zichtbaarheid;
   wat er staat, is altijd de tekst van de rechter.
 - Niets blijft langer bewaard dan de browsersessie, behalve weergavekeuzes.
-- De opmaak van Rechtspraak.nl zelf blijft zoveel mogelijk ongemoeid.
+- De opmaak van Rechtspraak.nl, Curia en EUR-Lex zelf blijft zoveel mogelijk ongemoeid.
 
 ## Pakket bouwen
 
