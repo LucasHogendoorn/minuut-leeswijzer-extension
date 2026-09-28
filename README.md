@@ -36,8 +36,10 @@ uitspraak zien of die erover gaat, en in welke overwegingen de rechter de vraag 
 <p align="center"><img src="docs/rechtsvraag.png" alt="Leeswijzer beoordeelt of een uitspraak een rechtsvraag beantwoordt" width="85%"></p>
 
 **Ook Europese rechtspraak.** Arresten en beschikkingen van het Hof van Justitie en het
-Gerecht en conclusies van advocaten-generaal, op Curia en EUR-Lex, in elke taal van de EU.
-Leeswijzer leest de genummerde punten zoals de overwegingen van een Nederlandse uitspraak.
+Gerecht en conclusies van advocaten-generaal, op Curia en EUR-Lex. Getest in het Nederlands,
+Engels en Frans; Nederlandse en Engelse pagina's krijgen vragen in hun eigen taal, andere talen
+de Engelse. Leeswijzer leest de genummerde punten zoals de overwegingen van een Nederlandse
+uitspraak.
 
 **Van 50 zoekresultaten naar de paar die tellen.** Zoek zoals altijd op Rechtspraak.nl. Leeswijzer beoordeelt
 de eerste 50 resultaten met ja, deels of nee, zet ze op volgorde en opent de beste 3, 10 of

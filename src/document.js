@@ -139,10 +139,25 @@ function textIndex(seg) {
       at.push([node, i]);
     }
   }
+  // An opinion's footnote markers "(20)" sit inside its sentences on the page
+  // but not in the sentence the model chose: leave them out on both sides.
+  if (MNT.site.footnotes) {
+    const keep = [];
+    const drop = new Set();
+    for (const m of flat.matchAll(FOOTNOTE_FLAT)) for (let i = m.index; i < m.index + m[0].length; i++) drop.add(i);
+    let kept = "";
+    for (let i = 0; i < flat.length; i++) {
+      if (drop.has(i)) continue;
+      kept += flat[i];
+      keep.push(at[i]);
+    }
+    return { flat: kept, at: keep };
+  }
   return { flat, at };
 }
 
-const squash = (t) => t.replace(/\s+/g, "");
+const FOOTNOTE_FLAT = /\(\d{1,3}\)/g;
+const squash = (t) => (MNT.site.footnotes ? t.replace(/\s+/g, "").replace(FOOTNOTE_FLAT, "") : t.replace(/\s+/g, ""));
 
 MNT.markSentences = (seg, picks) => {
   if (seg.marked) return;

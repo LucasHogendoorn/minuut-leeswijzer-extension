@@ -530,7 +530,8 @@ MNT.Panel = class {
     if (s.verdict?.core) {
       verdict.dataset.v = kern ? "ja" : "nee";
       swapText(verdict.querySelector(".v-word"), String(kern));
-      swapText(verdict.querySelector(".v-line"), kern === 1 ? "kernoverweging in deze uitspraak" : "kernoverwegingen in deze uitspraak");
+      const noun = s.docNoun ?? "uitspraak";
+      swapText(verdict.querySelector(".v-line"), kern === 1 ? `kernoverweging in deze ${noun}` : `kernoverwegingen in deze ${noun}`);
     } else if (s.verdict && !s.verdict.error) {
       const v = VERDICT.find((x) => s.verdict.p >= x.min);
       verdict.dataset.v = v.cls;
@@ -539,7 +540,7 @@ MNT.Panel = class {
     } else {
       verdict.dataset.v = s.verdict?.error ? "nee" : "pending";
       swapText(verdict.querySelector(".v-word"), s.verdict?.error ? "?" : "…");
-      swapText(verdict.querySelector(".v-line"), s.verdict?.error ? "geen oordeel over de hele uitspraak" : "leest de uitspraak");
+      swapText(verdict.querySelector(".v-line"), s.verdict?.error ? `geen oordeel over de hele ${s.docNoun ?? "uitspraak"}` : `leest de ${s.docNoun ?? "uitspraak"}`);
     }
     setNumber(this.$(".m-kern"), kern);
     setNumber(this.$(".m-rel"), rel);
