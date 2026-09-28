@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="nl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Leeswijzer · Welkom en privacy</title>
+    <link rel="stylesheet" href="../src/tokens.css" />
+    <link rel="stylesheet" href="../src/mascot.css" />
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="page">
+      <header class="hero">
+        <div class="hero-mascot" id="mascot"></div>
+        <p class="eyebrow r1" id="eyebrow">Minuut Leeswijzer</p>
+        <h1 class="r2" id="title">Leeswijzer voor Rechtspraak.nl</h1>
+        <p class="lede r3">Leeswijzer toont in elke uitspraak op Rechtspraak.nl de kernoverwegingen, en met een rechtsvraag ook wat daarover gaat. Gratis, zonder account.</p>
+      </header>
+
+      <section class="card privacy r4">
+        <div class="privacy-head">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
+          <h2>Er wordt niets bewaard</h2>
+        </div>
+        <ul class="facts">
+          <li><b>Geen opslag bij ons.</b> Onze server geeft uw verzoek alleen door aan het AI-model. Hij bewaart en logt geen vragen, uitspraken of gebruik.</li>
+          <li><b>Zero data retention bij het AI-model.</b> Elk verzoek gaat met zero data retention naar het AI-model (via de Vercel AI Gateway): de inhoud wordt niet bewaard en niet gebruikt om modellen te trainen.</li>
+          <li><b>In uw browser alleen voor deze sessie.</b> Uw rechtsvraag en de oordelen staan in het geheugen van deze browsersessie en verdwijnen zodra u de browser sluit. Alleen uw weergavekeuzes, zoals inklappen, blijven bewaard.</li>
+          <li><b>Privacyverklaring:</b> <a href="https://minuut.eu/leeswijzer/privacy/" target="_blank" rel="noopener">minuut.eu/leeswijzer/privacy</a></li>
+                    <li><b>Wat er naar het AI-model gaat:</b> uw rechtsvraag en de openbare tekst van de uitspraak of inhoudsindicatie. Zet daarom geen cliëntgegevens in uw rechtsvraag.</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Zo werkt het</h2>
+        <ol class="steps">
+          <li><span>1</span><div><b>Open een uitspraak.</b> Leeswijzer toont meteen de kernoverwegingen: waar de rechter zelf oordeelt over de inhoud en waar de beslissing op rust. De rest wordt verborgen; met één klik haalt u die terug. Met <kbd>j</kbd> en <kbd>k</kbd> springt u naar de volgende of vorige.</div></li>
+          <li><span>2</span><div><b>Stel eventueel een rechtsvraag</b> in het paneel rechts. Dan ziet u in elke uitspraak wat over uw vraag gaat.</div></li>
+          <li><span>3</span><div><b>Zoek zoals altijd.</b> Met een rechtsvraag beoordeelt Leeswijzer de eerste 50 zoekresultaten en zet er ja, deels of nee bij. De beste opent u in één keer.</div></li>
+        </ol>
+        <table class="legend">
+          <tr><td><span class="sw cat-kader"></span>Juridisch kader</td><td>de regel of maatstaf die de rechter hanteert</td></tr>
+          <tr><td><span class="sw cat-toepassing"></span>Toepassing juridisch kader</td><td>de rechter past die maatstaf toe op deze zaak</td></tr>
+          <tr><td><span class="sw cat-obiter"></span>Obiter dictum</td><td>ten overvloede, niet nodig voor de beslissing</td></tr>
+          <tr><td><span class="sw cat-stellingen"></span>Stellingen partijen</td><td>wat partijen stellen, vorderen of betwisten</td></tr>
+          <tr><td><span class="sw cat-feiten"></span>Feiten</td><td>vaststaande feiten en voorgeschiedenis</td></tr>
+          <tr><td><span class="sw cat-proces"></span>Procesverloop</td><td>stukken, zittingen, ontvankelijkheid, kosten</td></tr>
+          <tr><td><span class="sw cat-beslissing"></span>Beslissing</td><td>het dictum</td></tr>
+        </table>
+        <p class="note">Het AI-model schrijft niets: u leest altijd de tekst van de rechter. Het beoordeelt en kan zich vergissen; controleer wat u gebruikt.</p>
+      </section>
+
+      <section class="card">
+        <h2>Instelling</h2>
+        <label class="check">
+          <input id="autorun" type="checkbox" />
+          <span>
+            <strong>Lees automatisch mee</strong>
+            <em>Met uw rechtsvraag van deze sessie, zodra u zoekresultaten of een uitspraak opent.</em>
+          </span>
+        </label>
+      </section>
+
+      <a class="ad" href="https://minuut.eu/?ref=leeswijzer" target="_blank" rel="noopener">
+        <span class="ad-mark">M</span>
+        <span class="ad-text"><b>Minuut</b> is de grondigste juridische AI van Nederland</span>
+        <span class="ad-cta">minuut.eu →</span>
+      </a>
+
+      <p class="start"><a href="https://uitspraken.rechtspraak.nl/" class="primary">Naar Rechtspraak.nl</a></p>
+    </main>
+    <script src="../src/mascot.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

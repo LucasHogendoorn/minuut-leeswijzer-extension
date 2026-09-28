@@ -1,0 +1,109 @@
+/*
+ * Minuut design tokens, mirrored from main/apps/web/src/app/tokens.css.
+ * White canvas, forest-green ink, sage whispers. The only file in the
+ * extension that holds raw colours, sizes, radii, shadows and easings.
+ * Prefixed --mnt- because this sheet also lands on Rechtspraak.nl's :root;
+ * custom properties inherit into the panel's shadow root from there.
+ */
+:root,
+:host {
+  --mnt-canvas: #FFFFFF;
+  --mnt-surface: #FFFFFF;
+  --mnt-sidebar: #F3F5F4;
+  --mnt-fill: #EDF1EE;
+  --mnt-line: #E6EAE7;
+  --mnt-line-strong: #DCE2DD;
+  --mnt-text: #182B24;
+  --mnt-muted: #58625C;
+  --mnt-faint: #6F7872;
+  --mnt-underline: #AEBFB4;
+
+  --mnt-accent: #285640;
+  --mnt-accent-hover: #1E4432;
+  --mnt-accent-tint: #E4EBE6;
+  --mnt-focus: #739580;
+  --mnt-on-accent: #FFFFFF;
+
+  --mnt-success: #285640;
+  --mnt-success-tint: #EEF3EF;
+  --mnt-warning: #94691F;
+  --mnt-warning-tint: #FBF5E9;
+  --mnt-danger: #B03A3A;
+  --mnt-danger-tint: #FBEEED;
+  --mnt-ecli: #7B4C6C;
+  --mnt-ecli-tint: #F7F1F5;
+  --mnt-wet: #53683F;
+  --mnt-wet-tint: #F2F5ED;
+
+  --mnt-font-sans: "Minuut Geist", "Geist", ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mnt-font-serif: "Minuut Source Serif 4", "Source Serif 4", ui-serif, Georgia,
+    Cambria, "Times New Roman", serif;
+
+  --mnt-text-xs: 12px;
+  --mnt-text-sm: 13px;
+  --mnt-text-base: 14px;
+  --mnt-text-chat: 15px;
+  --mnt-text-lg: 17px;
+  --mnt-text-xl: 22px;
+
+  --mnt-leading-tight: 1.2;
+  --mnt-leading-snug: 1.4;
+  --mnt-leading-body: 1.6;
+
+  --mnt-radius-xs: 4px;
+  --mnt-radius-sm: 6px;
+  --mnt-radius-md: 8px;
+  --mnt-radius-lg: 12px;
+  --mnt-radius-xl: 16px;
+  --mnt-radius-2xl: 20px;
+  --mnt-radius-pill: 999px;
+  --mnt-shadow-soft: 0 1px 2px rgb(24 43 36 / 0.04), 0 4px 16px rgb(24 43 36 / 0.05);
+  --mnt-shadow-float: 0 12px 36px rgb(24 43 36 / 0.11), 0 2px 8px rgb(24 43 36 / 0.05);
+
+  /* Motion: the transitions.dev scale (https://transitions.dev/skill.html).
+     Pick a token by what the motion does, not by the nearest number. */
+  --mnt-duration-stagger: 40ms;   /* per-item stagger offset */
+  --mnt-duration-micro: 80ms;     /* tooltip/path delay, large stagger */
+  --mnt-duration-quick: 150ms;    /* close, text swap */
+  --mnt-duration-fast: 250ms;     /* open, tabs sliding, icon swap */
+  --mnt-duration-medium: 350ms;   /* panel close, accordion collapse */
+  --mnt-duration-slow: 400ms;     /* panel open, accordion expand, skeleton reveal */
+  --mnt-duration-very-slow: 500ms;/* emphasis, badge appear, text reveal */
+  --mnt-ease: cubic-bezier(0.22, 1, 0.36, 1); /* smooth-out: open, close, resize, position */
+  --mnt-ease-in-out: ease-in-out;             /* text swap, text reveal, skeleton reveal */
+  --mnt-ease-linear: linear;                  /* shimmer, spinner */
+  --mnt-ease-out: ease-out;                   /* tooltip open / close */
+  --mnt-ease-bounce: cubic-bezier(0.34, 1.36, 0.64, 1); /* badge pop */
+  --mnt-distance-micro: 4px;
+  --mnt-distance-base: 8px;
+  --mnt-distance-medium: 12px;
+  --mnt-scale-large: 0.96;
+  --mnt-scale-medium: 0.97;
+  --mnt-blur-small: 2px;
+  --mnt-blur-medium: 3px;
+
+  /* Categories of a rechtsoverweging: a pastel wash behind the text and an
+     ink for its label. Washes stay light enough that body text keeps full
+     contrast; the ink carries the distinction. */
+  --mnt-cat-kader-bg: #EEF3F9;
+  --mnt-cat-kader-ink: #36597F;
+  --mnt-cat-toepassing-bg: #EDF4EF;
+  --mnt-cat-toepassing-ink: #285640;
+  --mnt-cat-obiter-bg: #F6F0F5;
+  --mnt-cat-obiter-ink: #7B4C6C;
+  --mnt-cat-stellingen-bg: #FBF5E9;
+  --mnt-cat-stellingen-ink: #8A6219;
+  --mnt-cat-feiten-bg: #F3F4F2;
+  --mnt-cat-feiten-ink: #58625C;
+  --mnt-cat-proces-bg: #F8F8F6;
+  --mnt-cat-proces-ink: #6F7872;
+  --mnt-cat-beslissing-bg: #FBF0EA;
+  --mnt-cat-beslissing-ink: #97573A;
+
+  /* Underline under the sentences Jev picks inside a relevant r.o. */
+  --mnt-mark-line: rgb(40 86 64 / 0.4);
+  --mnt-mark-line-soft: rgb(40 86 64 / 0.22);
+
+  --mnt-panel-width: 380px;
+}

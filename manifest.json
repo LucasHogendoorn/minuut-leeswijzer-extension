@@ -1,0 +1,63 @@
+{
+  "manifest_version": 3,
+  "name": "Minuut Leeswijzer",
+  "short_name": "Leeswijzer",
+  "version": "1.0.1",
+  "description": "Toont in elke uitspraak op Rechtspraak.nl meteen de kernoverwegingen. Gratis, zonder account, niets wordt opgeslagen.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Minuut Leeswijzer",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    }
+  },
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "options_page": "options/options.html",
+  "permissions": [
+    "storage"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://uitspraken.rechtspraak.nl/*"
+      ],
+      "js": [
+        "src/shared.js",
+        "src/segmenter.js",
+        "src/jev.js",
+        "src/document.js",
+        "src/mascot.js",
+        "src/panel.js",
+        "src/results.js",
+        "src/content.js"
+      ],
+      "css": [
+        "src/tokens.css",
+        "src/page.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "fonts/*",
+        "src/panel.css",
+        "src/mascot.css"
+      ],
+      "matches": [
+        "https://uitspraken.rechtspraak.nl/*"
+      ]
+    }
+  ],
+  "minimum_chrome_version": "120",
+  "homepage_url": "https://minuut.eu/leeswijzer/"
+}

@@ -1,0 +1,390 @@
+/*
+ * Minuut Leeswijzer: styles injected into Rechtspraak.nl's page.
+ *
+ * Rule: Rechtspraak.nl must keep looking and feeling like itself. Nothing here
+ * restyles the site's own text, fonts, sizes or layout. We only add: a pastel
+ * wash behind judged r.o.'s, a small label in the site's own typeface, and the
+ * ability to fold or hide an r.o. Everything is prefixed mnt-; colours and
+ * motion come from tokens.css (motion: the transitions.dev scale).
+ */
+
+@font-face {
+  font-family: "Minuut Geist";
+  src: url("chrome-extension://__MSG_@@extension_id__/fonts/geist.woff2") format("woff2");
+  font-weight: 400 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Minuut Source Serif 4";
+  src: url("chrome-extension://__MSG_@@extension_id__/fonts/source-serif-4.woff2") format("woff2");
+  font-weight: 400 600;
+  font-display: swap;
+}
+
+/* Make room for the panel instead of covering the ruling. */
+/* The panel docks against the right edge; the page moves over by exactly its
+   width, and whatever shows behind it takes Rechtspraak.nl's own grey. */
+@media (min-width: 1180px) {
+  html.mnt-panel-open {
+    background: var(--mnt-page-bg, #f1f1f1);
+  }
+  html.mnt-panel-open body {
+    margin-right: var(--mnt-panel-width) !important;
+  }
+}
+
+/* ---- Judged segments: accordion + wash ----------------------------------
+   transitions.dev "Accordion expand": the wrapper is a grid track that goes
+   1fr <-> 0fr; the inner element clips and cross-fades with a 2px blur. */
+
+.mnt-seg {
+  --mnt-gutter: 24px;
+  --mnt-reach: 64px;
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-rows: 1fr;
+  transition:
+    grid-template-rows var(--mnt-duration-slow) var(--mnt-ease),
+    margin var(--mnt-duration-slow) var(--mnt-ease),
+    opacity var(--mnt-duration-fast) var(--mnt-ease-in-out);
+}
+.mnt-seg-inner {
+  min-height: 0;
+  overflow: hidden;
+  /* Reach into the gutter where Rechtspraak hangs the r.o. number. Nested
+     numbers such as "2.3.1" overhang the 24px gutter, so the clip reaches
+     further left than the wash does. */
+  margin-left: calc(-1 * var(--mnt-reach));
+  padding-left: var(--mnt-reach);
+  opacity: 1;
+  filter: blur(0);
+  transition:
+    opacity var(--mnt-duration-slow) var(--mnt-ease),
+    filter var(--mnt-duration-slow) var(--mnt-ease);
+}
+.mnt-seg.mnt-folded,
+.mnt-seg.mnt-hidden {
+  grid-template-rows: 0fr;
+  margin: 0 !important;
+  transition:
+    grid-template-rows var(--mnt-duration-medium) var(--mnt-ease),
+    margin var(--mnt-duration-medium) var(--mnt-ease);
+}
+.mnt-seg.mnt-folded > .mnt-seg-inner,
+.mnt-seg.mnt-hidden > .mnt-seg-inner {
+  opacity: 0;
+  filter: blur(var(--mnt-blur-small));
+  transition:
+    opacity var(--mnt-duration-medium) var(--mnt-ease),
+    filter var(--mnt-duration-medium) var(--mnt-ease);
+}
+
+/* Space between two washed r.o.'s so each reads as its own block. */
+.mnt-seg.mnt-judged {
+  margin: 10px 0;
+}
+.mnt-seg::before,
+.mnt-seg::after {
+  content: "";
+  position: absolute;
+  inset: -4px -12px 0 calc(-1 * var(--mnt-gutter) - 12px);
+  border-radius: var(--mnt-radius-md);
+  z-index: -1;
+  pointer-events: none;
+}
+.mnt-seg::before {
+  background: var(--mnt-cat-bg, transparent);
+  opacity: 1;
+  transition:
+    background-color var(--mnt-duration-slow) var(--mnt-ease-in-out),
+    opacity var(--mnt-duration-medium) var(--mnt-ease);
+}
+.mnt-seg.mnt-folded::before,
+.mnt-seg.mnt-hidden::before {
+  opacity: 0;
+}
+.mnt-seg.mnt-doubt {
+  opacity: 0.62;
+}
+.mnt-seg.mnt-low {
+  opacity: 0.5;
+}
+.mnt-seg.mnt-forced {
+  opacity: 0.75;
+}
+.mnt-seg.mnt-doubt:hover,
+.mnt-seg.mnt-low:hover,
+.mnt-seg.mnt-forced:hover {
+  opacity: 1;
+}
+.mnt-seg.mnt-flash::after {
+  animation: mnt-flash 1600ms var(--mnt-ease);
+}
+@keyframes mnt-flash {
+  0%,
+  35% {
+    box-shadow: 0 0 0 2px var(--mnt-cat-ink, var(--mnt-focus));
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent;
+  }
+}
+
+/* Category colours: one wash and one ink per category. */
+.mnt-cat-kader { --mnt-cat-bg: var(--mnt-cat-kader-bg); --mnt-cat-ink: var(--mnt-cat-kader-ink); }
+.mnt-cat-toepassing { --mnt-cat-bg: var(--mnt-cat-toepassing-bg); --mnt-cat-ink: var(--mnt-cat-toepassing-ink); }
+.mnt-cat-obiter { --mnt-cat-bg: var(--mnt-cat-obiter-bg); --mnt-cat-ink: var(--mnt-cat-obiter-ink); }
+.mnt-cat-stellingen { --mnt-cat-bg: var(--mnt-cat-stellingen-bg); --mnt-cat-ink: var(--mnt-cat-stellingen-ink); }
+.mnt-cat-feiten { --mnt-cat-bg: var(--mnt-cat-feiten-bg); --mnt-cat-ink: var(--mnt-cat-feiten-ink); }
+.mnt-cat-proces { --mnt-cat-bg: var(--mnt-cat-proces-bg); --mnt-cat-ink: var(--mnt-cat-proces-ink); }
+.mnt-cat-beslissing { --mnt-cat-bg: var(--mnt-cat-beslissing-bg); --mnt-cat-ink: var(--mnt-cat-beslissing-ink); }
+
+/* ---- Label: plain text in the gap above the block, on a lingering hover --
+   transitions.dev "Tooltip" timing (delayed in, quick out), but no surface:
+   no pill, no shadow, nothing over the court's text. */
+
+.mnt-label {
+  position: absolute;
+  bottom: calc(100% + 5px);
+  left: 0;
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+  font-family: Verdana, Helvetica, sans-serif;
+  font-size: 10px;
+  line-height: 12px;
+  white-space: nowrap;
+  color: var(--mnt-cat-ink, var(--mnt-muted));
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--mnt-duration-quick) var(--mnt-ease-out);
+}
+.mnt-label[hidden] {
+  display: none;
+}
+.mnt-seg.mnt-judged:hover > .mnt-label {
+  opacity: 0.8;
+  transition-delay: 500ms;
+}
+.mnt-label-note {
+  color: var(--mnt-faint);
+}
+.mnt-label-note::before {
+  content: "·";
+  margin-right: 6px;
+}
+
+/* ---- Sentence marks: bold + a thin underline that draws itself in -------
+   The best sentence is set bold with a 2px line under it; others that still
+   carry weight get only a fainter line. The line is a background so it can
+   sweep in left to right; box-decoration-break repeats it on every line. */
+
+mark.mnt-mark {
+  color: inherit;
+  background-color: transparent;
+  background-image: linear-gradient(var(--mnt-line-color), var(--mnt-line-color));
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  background-size: 0% var(--mnt-line-width);
+  padding-bottom: 2px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  animation: mnt-underline 650ms var(--mnt-ease) var(--mnt-mark-delay, 0ms) forwards;
+}
+mark.mnt-mark-top {
+  --mnt-line-color: var(--mnt-mark-line);
+  --mnt-line-width: 2px;
+  font-weight: 700;
+}
+mark.mnt-mark-also {
+  --mnt-line-color: var(--mnt-mark-line-soft);
+  --mnt-line-width: 1px;
+}
+@keyframes mnt-underline {
+  to { background-size: 100% var(--mnt-line-width); }
+}
+
+/* ---- Fold line for a folded r.o. (accordion too) ------------------------ */
+
+.mnt-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--mnt-duration-medium) var(--mnt-ease);
+}
+.mnt-fold[data-open="true"] {
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--mnt-duration-slow) var(--mnt-ease);
+}
+.mnt-fold-inner {
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity var(--mnt-duration-medium) var(--mnt-ease);
+}
+.mnt-fold[data-open="true"] .mnt-fold-inner {
+  opacity: 1;
+  transition: opacity var(--mnt-duration-slow) var(--mnt-ease);
+}
+/* Doubled class + element outranks Rechtspraak.nl's `.uitspraak button` rule
+   (width: auto; max-height: 1.5em; font-size: 80%). */
+.mnt-fold.mnt-fold button.mnt-fold-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-height: none;
+  margin: 3px 0;
+  padding: 3px 8px;
+  border-radius: var(--mnt-radius-sm);
+  font-family: Verdana, Helvetica, sans-serif;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--mnt-faint);
+  cursor: pointer;
+  transition: background-color var(--mnt-duration-quick) var(--mnt-ease);
+}
+.mnt-fold.mnt-fold button.mnt-fold-btn:hover {
+  background: var(--mnt-cat-bg, var(--mnt-sidebar));
+}
+.mnt-fold.mnt-fold button.mnt-fold-btn:focus-visible {
+  outline: 2px solid var(--mnt-focus);
+  outline-offset: 1px;
+}
+.mnt-fold-nr {
+  flex: none;
+  font-weight: 700;
+  color: var(--mnt-muted);
+}
+.mnt-fold-why {
+  flex: none;
+  color: var(--mnt-cat-ink, var(--mnt-muted));
+}
+.mnt-fold-snip {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.mnt-fold-act {
+  flex: none;
+  color: var(--mnt-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---- Marker for a run of hidden r.o.'s --------------------------------------
+   One thin centred line where overwegingen were skipped, in the page's own
+   typeface. Replaces the gap; clicking it shows the skipped r.o.'s. */
+
+.mnt-fold.mnt-skip.mnt-skip button.mnt-fold-btn {
+  justify-content: center;
+  gap: 12px;
+  margin: 4px 0;
+  padding: 2px 0;
+  background: none;
+  color: var(--mnt-faint);
+}
+.mnt-fold.mnt-skip.mnt-skip button.mnt-fold-btn:hover {
+  background: none;
+  color: var(--mnt-accent);
+}
+.mnt-skip-rule {
+  flex: 1;
+  height: 1px;
+  background: repeating-linear-gradient(90deg, var(--mnt-line-strong) 0 4px, transparent 4px 8px);
+}
+.mnt-skip-text {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.mnt-skip-nrs {
+  color: var(--mnt-underline);
+  font-variant-numeric: tabular-nums;
+}
+.mnt-fold.mnt-skip.mnt-skip button.mnt-fold-btn:hover .mnt-skip-rule {
+  background: repeating-linear-gradient(90deg, var(--mnt-focus) 0 4px, transparent 4px 8px);
+}
+
+/* Empty containers left behind by hidden r.o.'s. */
+.mnt-void {
+  display: none !important;
+}
+
+/* ---- Search results: "Gaat dit over mijn rechtsvraag?" ------------------ */
+
+.mnt-hit {
+  display: inline-flex;
+  align-self: flex-start;
+  width: fit-content;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0 2px;
+  padding: 2px 9px 2px 7px;
+  border-radius: var(--mnt-radius-pill);
+  font-family: Verdana, Helvetica, sans-serif;
+  font-size: 11px;
+  line-height: 18px;
+  background: var(--mnt-sidebar);
+  color: var(--mnt-muted);
+  animation: mnt-label-in var(--mnt-duration-slow) var(--mnt-ease-in-out) both;
+}
+.mnt-hit b {
+  font-weight: 700;
+  color: var(--mnt-text);
+}
+.mnt-hit-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--mnt-line-strong);
+}
+.mnt-hit-ja { background: var(--mnt-success-tint); }
+.mnt-hit-ja .mnt-hit-dot { background: var(--mnt-accent); }
+.mnt-hit-ja b { color: var(--mnt-accent); }
+.mnt-hit-deels { background: var(--mnt-warning-tint); }
+.mnt-hit-deels .mnt-hit-dot { background: var(--mnt-warning); }
+.mnt-hit-pending .mnt-hit-dot {
+  animation: mnt-breathe 1.2s var(--mnt-ease-in-out) infinite;
+}
+.rnl-listresults-item-container {
+  transition: opacity var(--mnt-duration-fast) var(--mnt-ease-in-out);
+}
+.rnl-listresults-item-container.mnt-hit-low {
+  opacity: 0.45;
+}
+.rnl-listresults-item-container.mnt-hit-low:hover {
+  opacity: 1;
+}
+.rnl-listresults-item-container.mnt-hit-gone {
+  display: none !important;
+}
+@keyframes mnt-breathe {
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  mark.mnt-mark {
+    animation: none !important;
+    background-size: 100% var(--mnt-line-width);
+  }
+  .mnt-label,
+  .mnt-seg,
+  .mnt-seg-inner,
+  .mnt-seg::before,
+  .mnt-fold,
+  .mnt-fold-inner,
+  .rnl-listresults-item-container {
+    transition: none !important;
+  }
+  .mnt-hit,
+  .mnt-seg.mnt-flash::after,
+  .mnt-hit-pending .mnt-hit-dot {
+    animation: none !important;
+  }
+}

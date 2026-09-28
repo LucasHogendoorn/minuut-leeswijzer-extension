@@ -1,0 +1,122 @@
+/* Minuut Leeswijzer: the mascot (see src/mascot.js). Shared by the panel and
+   the welcome page. */
+
+.mascot {
+  display: inline-block;
+  flex: none;
+  width: var(--m-size);
+  height: var(--m-size);
+}
+.m-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.m-ribbon { fill: var(--mnt-accent); }
+.m-fold { fill: var(--mnt-accent-hover); }
+.m-glasses circle { fill: #fff; stroke: var(--mnt-text); stroke-width: 1.5; }
+.m-glasses path,
+.m-brows path,
+.m-happy-eyes path,
+.m-mouth {
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.m-glasses path { stroke: var(--mnt-text); }
+.m-brows path { stroke: #fff; opacity: 0; transition: opacity var(--mnt-duration-quick) var(--mnt-ease-in-out); }
+.m-eyes circle { fill: var(--mnt-text); }
+.m-happy-eyes path { stroke: var(--mnt-text); }
+.m-mouth { stroke: #fff; }
+.m-cheek { fill: #E9A99C; opacity: 0; transition: opacity var(--mnt-duration-very-slow) var(--mnt-ease-in-out); }
+.m-thought circle { fill: var(--mnt-focus); opacity: 0; }
+
+/* Icon-swap style cross-fade between faces: blur + scale + opacity. */
+.m-eyes,
+.m-happy-eyes,
+.m-mouth {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition:
+    opacity var(--mnt-duration-fast) var(--mnt-ease-in-out),
+    transform var(--mnt-duration-fast) var(--mnt-ease-in-out),
+    filter var(--mnt-duration-fast) var(--mnt-ease-in-out);
+}
+.m-happy-eyes,
+.m-mouth-happy,
+.m-mouth-think,
+.m-mouth-worried {
+  opacity: 0;
+  transform: scale(0.6);
+  filter: blur(var(--mnt-blur-small));
+}
+.m-body {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+
+/* idle: blink every few seconds */
+.mascot[data-state="idle"] .m-eyes {
+  animation: m-blink 5.2s var(--mnt-ease-in-out) infinite;
+}
+@keyframes m-blink {
+  0%, 93%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.1); }
+}
+
+/* thinking: eyes drift up and wander, thought dots rise one by one, body bobs */
+.mascot[data-state="thinking"] .m-eyes {
+  animation: m-ponder 2.4s var(--mnt-ease-in-out) infinite;
+}
+@keyframes m-ponder {
+  0%, 100% { transform: translate(1px, -1.4px); }
+  35% { transform: translate(-1.2px, -1.6px); }
+  65% { transform: translate(1.4px, -0.6px); }
+}
+.mascot[data-state="thinking"] .m-mouth-idle { opacity: 0; transform: scale(0.6); filter: blur(var(--mnt-blur-small)); }
+.mascot[data-state="thinking"] .m-mouth-think { opacity: 1; transform: none; filter: none; }
+.mascot[data-state="thinking"] .m-body {
+  animation: m-bob 1.6s var(--mnt-ease-in-out) infinite;
+}
+@keyframes m-bob {
+  50% { transform: translateY(-1.5px) rotate(-1.5deg); }
+}
+.mascot[data-state="thinking"] .m-thought circle {
+  animation: m-think 1.5s var(--mnt-ease-in-out) infinite;
+}
+.mascot[data-state="thinking"] .m-thought .d2 { animation-delay: 0.2s; }
+.mascot[data-state="thinking"] .m-thought .d3 { animation-delay: 0.4s; }
+@keyframes m-think {
+  0%, 100% { opacity: 0; transform: translateY(2px); }
+  35%, 70% { opacity: 1; transform: translateY(0); }
+}
+
+/* happy: one hop with a soft bounce, smiling eyes and mouth, blush */
+.mascot[data-state="happy"] .m-body {
+  animation: m-hop var(--mnt-duration-very-slow) var(--mnt-ease-bounce) 1 both;
+}
+@keyframes m-hop {
+  0% { transform: translateY(0) scale(1, 1); }
+  30% { transform: translateY(1px) scale(1.04, 0.94); }
+  60% { transform: translateY(-4px) scale(0.98, 1.03); }
+  100% { transform: translateY(0) scale(1, 1); }
+}
+.mascot[data-state="happy"] .m-eyes { opacity: 0; transform: scale(0.6); filter: blur(var(--mnt-blur-small)); }
+.mascot[data-state="happy"] .m-happy-eyes { opacity: 1; transform: none; filter: none; }
+.mascot[data-state="happy"] .m-mouth-idle { opacity: 0; transform: scale(0.6); filter: blur(var(--mnt-blur-small)); }
+.mascot[data-state="happy"] .m-mouth-happy { opacity: 1; transform: none; filter: none; }
+.mascot[data-state="happy"] .m-cheek { opacity: 0.75; }
+
+/* worried */
+.mascot[data-state="worried"] .m-brows path { opacity: 1; }
+.mascot[data-state="worried"] .m-mouth-idle { opacity: 0; transform: scale(0.6); }
+.mascot[data-state="worried"] .m-mouth-worried { opacity: 1; transform: none; filter: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .mascot *,
+  .mascot *::before {
+    animation: none !important;
+    transition: none !important;
+  }
+}
