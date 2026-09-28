@@ -35,6 +35,8 @@ cols = [
     ("EU-en", lambda c: c.get("src:eu_en", 0)),
     ("cache hit", lambda c: c.get("cache:hit", 0)),
     ("miss", lambda c: c.get("cache:miss", 0)),
+    ("lookups", lambda c: total(c, "lookup:")),
+    ("cache fout", lambda c: c.get("cache:error", 0)),
     ("Jev fout", lambda c: c.get("upstream:error", 0)),
     ("Jev druk", lambda c: c.get("upstream:busy", 0)),
     ("429", lambda c: c.get("refused:rate_limit", 0)),

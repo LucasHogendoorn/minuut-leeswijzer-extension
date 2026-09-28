@@ -17,11 +17,12 @@ Er is geen build-stap en er zijn geen dependencies: het is gewone JavaScript en 
 De AI-aanroepen lopen via een Cloudflare Worker (`worker/`). Die houdt de API-sleutel,
 bouwt de vragen aan het AI-model uit vaste sjablonen (`QUESTIONS` in
 `worker/src/index.js`), begrenst het aantal verzoeken en bewaart alleen oordelen over
-openbare tekst die zonder rechtsvraag zijn gevraagd (Cloudflare KV, 180 dagen). Daarnaast
+openbare tekst die zonder rechtsvraag zijn gevraagd (Cloudflare D1, `worker/src/cache.js`;
+schema in `worker/migrations/`). Daarnaast
 houdt hij anonieme tellers per dag bij (`worker/src/stats.js`): actieve installaties en
 nieuwe installaties per versie, beoordelingen per soort, cache-hits, fouten en
 geweigerde verzoeken. Alleen namen en aantallen: geen vraag, tekst, ECLI, URL, IP-adres of
-ID. Lokaal gebruikt `wrangler dev` een eigen, lege opslag.
+ID. Lokaal gebruikt `wrangler dev` een eigen, lege opslag en een eigen, lokale database.
 
 De productieserver accepteert alleen de officiële extensie. Een uitgepakte installatie uit
 je eigen map krijgt een andere extensie-ID en wordt geweigerd. Draai de Worker daarom
@@ -38,7 +39,13 @@ lokaal:
 
    Een lege `ALLOWED_ORIGINS` laat elke uitgepakte extensie toe. Lokaal is geen `RL_SALT`
    nodig.
-3. `cd worker && wrangler dev --port 8787`
+3. Maak de lokale database aan en start de Worker:
+
+   ```sh
+   cd worker
+   wrangler d1 migrations apply leeswijzer-cache --local
+   wrangler dev --port 8787
+   ```
 4. Maak in de hoofdmap `dev-config.json` (staat ook in `.gitignore`):
 
    ```json
@@ -50,7 +57,12 @@ lokaal:
 
 Wie de Worker zelf deployt, zet de secrets met `wrangler secret put AI_GATEWAY_API_KEY` en
 `wrangler secret put RL_SALT`, en de eigen extensie-ID in `ALLOWED_ORIGINS` in
-`worker/wrangler.toml`.
+`worker/wrangler.toml`. Voor de cache: `wrangler d1 create leeswijzer-cache`, het `database_id`
+in `worker/wrangler.toml` en `wrangler d1 migrations apply leeswijzer-cache --remote`.
+
+Hoe vol de cache is: `./scripts/cache.sh` (grootte en sjablonen), `./scripts/cache.sh rows`
+(rijen per sjabloon; leest de hele tabel) en `./scripts/cache.sh prune <tpl>` (rijen van een
+oud sjabloon weghalen; elke verwijderde rij telt als geschreven rij).
 
 De dagtellers zijn te lezen via `GET /v1/stats?days=30` met een geheim token. Zet dat met
 `wrangler secret put STATS_TOKEN` (bijvoorbeeld de uitvoer van `openssl rand -hex 32`);
@@ -76,6 +88,19 @@ Zonder Gateway-sleutel kan `wrangler dev` een lokale nep-gateway gebruiken:
 - **Fouten:** een `400` wordt niet herhaald; bij `429` en `5xx` probeert de extensie het tot
   vier keer opnieuw. Een `message`-veld in de JSON wordt de foutmelding.
 
+**Opzoeken in de cache** (`POST /v1/lookup`, JSON): de bewaarde oordelen voor veel r.o.'s van
+één uitspraak in één verzoek, alleen voor soorten zonder rechtsvraag.
+
+```json
+{ "kind": "core", "court": "de Hoge Raad", "items": [{ "state": "<tekst>" }, { "state": "<tekst>" }] }
+```
+
+- `kind`: `core` of `sentences` (dan per item ook `sentences: [...]`); `court` en `lang` zoals
+  hierboven; hoogstens 100 items en 512 KB.
+- **Antwoord:** `{ "answers": [ { … }, null ] }`, in dezelfde volgorde; `null` als er niets
+  bewaard is. Het endpoint vraagt nooit iets aan het model en schrijft niets; de extensie
+  beoordeelt daarna alleen de ontbrekende r.o.'s via `/v1/judge`.
+
 ## Waar zit wat
 
 | Bestand | Wat |
@@ -90,7 +115,8 @@ Zonder Gateway-sleutel kan `wrangler dev` een lokale nep-gateway gebruiken:
 | `src/panel.js`, `src/panel.css` | Het zijpaneel |
 | `src/results.js` | De zoekresultaten |
 | `options/` | Welkomst- en privacypagina |
-| `worker/src/index.js` | De server: vaste vragen aan het AI-model, limieten, gedeelde cache voor openbare tekst |
+| `worker/src/index.js` | De server: vaste vragen aan het AI-model, limieten, `/v1/judge` en `/v1/lookup` |
+| `worker/src/cache.js`, `worker/migrations/` | Gedeelde cache voor openbare tekst (D1): sleutels, opslag, kosten |
 | `worker/src/stats.js` | Anonieme dagtellers en `GET /v1/stats` |
 
 ## Uitgangspunten
