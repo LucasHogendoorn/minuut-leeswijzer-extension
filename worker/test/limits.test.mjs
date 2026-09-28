@@ -107,12 +107,26 @@ test("exact windows: refuse over the limit, lease only within room, retry-after"
   assert.deepEqual(w.take(win, 3, 10, t), { granted: 5, retryAfter: 0 }); // lease capped by room
   const r = w.take(win, 1, 0, t + 1000);
   assert.equal(r.granted, 0);
-  assert.equal(r.retryAfter, 9); // the second-0 bucket leaves the 10 s window at +10 s
-  assert.equal(w.take(win, 1, 0, t + 10_000).granted, 1);
+  assert.equal(r.retryAfter, 10); // the second-0 bucket leaves the 10 s window at +11 s
+  assert.equal(w.take(win, 1, 0, t + 10_000).granted, 0); // still inside
+  assert.equal(w.take(win, 1, 0, t + 11_000).granted, 1);
   // 60 s window: 11 used, 4 left.
-  assert.equal(w.take(win, 5, 0, t + 11_000).granted, 0);
-  assert.equal(w.take(win, 4, 0, t + 11_000).granted, 4);
-  assert.equal(w.take(win, 1, 0, t + 12_000).retryAfter, 48);
+  assert.equal(w.take(win, 5, 0, t + 12_000).granted, 0);
+  assert.equal(w.take(win, 4, 0, t + 12_000).granted, 4);
+  assert.equal(w.take(win, 1, 0, t + 13_000).retryAfter, 48);
+});
+
+test("exact windows hold in wall-clock time: a burst at x.999 s is counted a full window", () => {
+  const w = new Windows();
+  const win = [{ limit: 10, ms: 10_000 }];
+  const t = 200_000_999; // x.999 s
+  assert.equal(w.take(win, 10, 0, t).granted, 10);
+  // 9.001 s later (the start of second x+10) the burst still counts.
+  assert.equal(w.take(win, 1, 0, t + 9_001).granted, 0);
+  assert.equal(w.take(win, 1, 0, t + 10_000).granted, 0);
+  // From second x+11 (10.001 s later) there is room again.
+  assert.equal(w.take(win, 10, 0, t + 10_001).granted, 10);
+  // Never more than the cap in any 10 s of wall-clock time: 20 tokens took 10.001 s.
 });
 
 const req = (body, headers = {}) => new Request("https://x/v1/judge", { method: "POST", headers, body, duplex: "half" });

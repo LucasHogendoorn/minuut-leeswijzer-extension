@@ -206,7 +206,12 @@ export class Leases {
 }
 
 // ---- Exact sliding windows (inside the per-client Durable Object) --------------------------
-// Buckets per second; `windows` is [{ limit, ms }]. Returns how many tokens were
+// Buckets per second; `windows` is [{ limit, ms }]. A window of `span` seconds
+// counts the buckets of the current second and the `span` seconds before it
+// (span + 1 buckets), so a token taken at x.999 s is still counted a full
+// `span` seconds later: the caps hold in wall-clock time, never ~2x within
+// span - 1 s. Buckets are pruned only once they are outside every window.
+// Returns how many tokens were
 // granted (0 = refused) and, when refused, the seconds until `weight` would fit.
 // `extra` tokens (a lease) are granted only as far as every window has room.
 export class Windows {
@@ -215,22 +220,22 @@ export class Windows {
   take(windows, weight = 1, extra = 0, nowMs = Date.now()) {
     const now = Math.floor(nowMs / 1000);
     const horizon = Math.max(...windows.map((w) => w.ms)) / 1000;
-    for (const sec of this.buckets.keys()) if (sec <= now - horizon) this.buckets.delete(sec);
+    for (const sec of this.buckets.keys()) if (sec < now - horizon) this.buckets.delete(sec);
     let room = Infinity;
     let retryAfter = 0;
     for (const w of windows) {
       const span = w.ms / 1000;
       let n = 0;
-      for (const [sec, c] of this.buckets) if (sec > now - span) n += c;
+      for (const [sec, c] of this.buckets) if (sec >= now - span) n += c;
       room = Math.min(room, w.limit - n);
       if (n + weight > w.limit) {
         // Oldest buckets first: when has enough of this window expired?
         let freed = 0;
-        let at = span;
-        for (const sec of [...this.buckets.keys()].filter((s) => s > now - span).sort((a, b) => a - b)) {
+        let at = span + 1;
+        for (const sec of [...this.buckets.keys()].filter((s) => s >= now - span).sort((a, b) => a - b)) {
           freed += this.buckets.get(sec);
           if (n - freed + weight <= w.limit) {
-            at = sec + span - now;
+            at = sec + span + 1 - now; // the second in which `sec` leaves the window
             break;
           }
         }

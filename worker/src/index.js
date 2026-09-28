@@ -593,7 +593,7 @@ export class Limiter extends DurableObject {
     if (n) this.minute.set(now, (this.minute.get(now) ?? 0) + n);
     let perMinute = 0;
     for (const [sec, c] of this.minute) {
-      if (sec <= now - 60) this.minute.delete(sec);
+      if (sec < now - 60) this.minute.delete(sec); // inclusive, as in Windows
       else perMinute += c;
     }
     return { shed: perMinute > GLOBAL.perMinute || this.day.calls >= GLOBAL.perDay };
