@@ -3,6 +3,12 @@ main = "src/index.js"
 compatibility_date = "2026-03-01"
 # node:zlib for the cache's answer codec (src/cache.js).
 compatibility_flags = ["nodejs_compat"]
+# The API lives on the custom domain (extension 1.1 and later), behind the
+# zone's WAF rate-limiting rule (CONTRIBUTING.md).
+routes = [{ pattern = "leeswijzer-api.minuut.eu", custom_domain = true }]
+# Extension 1.0.x has the workers.dev URL built in, so that host stays on until
+# 1.0.x is gone; it only serves /v1/judge, with tighter limits (src/index.js,
+# LEGACY_CALLS). Switch-off plan in CONTRIBUTING.md: then set this to false.
 workers_dev = true
 
 # No request logging: Workers Logs and traces stay off.

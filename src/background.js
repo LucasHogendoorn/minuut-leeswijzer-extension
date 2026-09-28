@@ -6,7 +6,9 @@
 // the browser wipes when it closes.
 
 // Minuut's production Worker (worker/; see CONTRIBUTING.md to run your own).
-const PRODUCTION_ENDPOINT = "https://minuut-leeswijzer.lucas-hogendoorn.workers.dev/v1/judge";
+// /v1/lookup and /v1/ping are derived from it. The calls rely on CORS (the
+// Worker answers only the store extension's origin), not on host permissions.
+const PRODUCTION_ENDPOINT = "https://leeswijzer-api.minuut.eu/v1/judge";
 const CACHE_PREFIX = "jev:";
 const MAX_ATTEMPTS = 4;
 
