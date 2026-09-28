@@ -26,8 +26,19 @@ function endpoint() {
   return endpointPromise;
 }
 
-chrome.runtime.onInstalled.addListener(({ reason }) => {
-  if (reason === "install") chrome.tabs.create({ url: chrome.runtime.getURL("options/options.html?welkom") });
+// seenVersion: the last version this profile was told about (the "Nieuw in
+// Leeswijzer" card in src/whatsnew.js, which holds the full rule). A fresh
+// install records the current version and gets the welcome page; an update
+// records the version it came from, unless a card already recorded one.
+chrome.runtime.onInstalled.addListener(async ({ reason, previousVersion }) => {
+  const version = chrome.runtime.getManifest().version;
+  if (reason === "install") {
+    await chrome.storage.local.set({ seenVersion: version });
+    chrome.tabs.create({ url: chrome.runtime.getURL("options/options.html?welkom") });
+  } else if (reason === "update" && previousVersion) {
+    const { seenVersion } = await chrome.storage.local.get("seenVersion");
+    if (!seenVersion) await chrome.storage.local.set({ seenVersion: previousVersion });
+  }
 });
 
 async function sha256(text) {

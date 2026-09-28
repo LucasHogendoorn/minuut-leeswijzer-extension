@@ -561,6 +561,7 @@
       S.open = open;
       MNT.storage.set({ panelOpen: open });
       if (open) {
+        announceRelease();
         if (S.mode === "ruling" && S.segments.length) runRuling();
         else if (S.mode === "results" && S.question) runHits();
       } else {
@@ -637,6 +638,21 @@
     rerender: schedule,
   });
 
+  // After an update, "Nieuw in Leeswijzer" once, over the open panel, when the
+  // tab is viewed. Reading goes on behind it. Which profiles qualify:
+  // MNT.releaseToAnnounce (src/whatsnew.js).
+  let releaseChecked = false;
+  function announceRelease() {
+    if (releaseChecked || !S.open) return;
+    releaseChecked = true;
+    whenVisible(async () => {
+      const version = await MNT.releaseToAnnounce().catch(() => null);
+      if (!version || !S.open) return;
+      // Let the panel reveal finish first.
+      setTimeout(() => MNT.showWhatsNew(panel, { version, site: site.id }), 700);
+    });
+  }
+
   // j / k: next / previous kernoverweging, like a reader's shortcut.
   document.addEventListener("keydown", (e) => {
     if (S.mode !== "ruling" || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -690,6 +706,7 @@
     panel.mount();
     schedule();
     tick();
+    announceRelease();
     setInterval(tick, TICK_MS);
   })();
 })();
