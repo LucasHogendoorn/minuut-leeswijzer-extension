@@ -399,7 +399,7 @@
     let done = 0;
     for (const hit of hits) {
       const entry = ctx.hitVerdicts.get(hit.ecli);
-      const key = `${S.question}|${S.lowMode}|${[...S.hitFilter].join()}|${entry?.pending ? "pending" : entry?.error ? "error" : entry?.p}`;
+      const key = `${S.question}|${S.lowMode}|${MNT.shift}|${[...S.hitFilter].join()}|${entry?.pending ? "pending" : entry?.error ? "error" : entry?.p}`;
       if (hit.el.dataset.mntHit !== key || !hit.el.querySelector(":scope > .mnt-hit")) {
         MNT.renderHit(hit, entry, S.lowMode, S.hitFilter);
         hit.el.dataset.mntHit = key;
@@ -668,6 +668,22 @@
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area === "local" && changes.autoRun) ctx.autoRun = changes.autoRun.newValue !== false;
+    // Strictness only moves the thresholds: re-tier what is already judged.
+    if (area === "local" && changes.strictness) {
+      MNT.setStrictness(changes.strictness.newValue);
+      applyAll();
+      if (S.mode === "ruling") {
+        for (const seg of S.segments) {
+          if (seg.sentencesAsked && !isRelevant(seg)) {
+            MNT.unmarkSentences(seg);
+            seg.sentencesAsked = false;
+          }
+          watchSentences(seg);
+        }
+      }
+      if (S.mode === "results") scanHits();
+      schedule();
+    }
     // The question is shared by all tabs: a change in one tab reaches the
     // others (a tab in the background applies it when it is viewed).
     if (area === "session" && changes.question) {
@@ -690,7 +706,7 @@
   });
 
   (async () => {
-    const saved = await MNT.storage.get(["panelOpen", "sort", "lowMode", "autoRun", "defaults"]);
+    const saved = await MNT.storage.get(["panelOpen", "sort", "lowMode", "autoRun", "defaults", "strictness"]);
     const session = await MNT.session.get(["question", "recent"]).catch(() => ({}));
     S.open = saved.panelOpen !== false;
     S.question = session.question ?? "";
@@ -699,6 +715,7 @@
     if (saved.defaults) S.defaults = saved.defaults;
     S.lowMode = S.defaults.lowMode;
     ctx.autoRun = saved.autoRun !== false;
+    MNT.setStrictness(saved.strictness);
     // The strip the page frees for the panel takes the site's own background.
     const pageBg = getComputedStyle(document.querySelector("main") ?? document.body).backgroundColor;
     if (pageBg && pageBg !== "rgba(0, 0, 0, 0)") document.documentElement.style.setProperty("--mnt-page-bg", pageBg);

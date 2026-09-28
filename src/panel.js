@@ -22,8 +22,9 @@ const snippetOf = (seg) => seg.text.replace(/^(?:r\.?\s?o\.?\s*)?\d{1,2}(?:\.\d{
 const cssMs = (el, name, fallback) => parseFloat(getComputedStyle(el).getPropertyValue(name)) || fallback;
 const TOP_N = [3, 10, 25];
 const VERDICT = [
-  { min: MNT.RELEVANT, word: "Ja", line: "gaat over uw rechtsvraag", cls: "ja" },
-  { min: MNT.DOUBT, word: "Deels", line: "raakt uw vraag, beslist haar niet", cls: "deels" },
+  // Getters: the thresholds follow the strictness setting.
+  { get min() { return MNT.RELEVANT; }, word: "Ja", line: "gaat over uw rechtsvraag", cls: "ja" },
+  { get min() { return MNT.DOUBT; }, word: "Deels", line: "raakt uw vraag, beslist haar niet", cls: "deels" },
   { min: -1, word: "Nee", line: "gaat over iets anders", cls: "nee" },
 ];
 // Group names follow the mode: with a question they speak about the question,

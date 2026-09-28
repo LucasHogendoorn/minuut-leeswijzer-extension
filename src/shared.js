@@ -22,10 +22,20 @@ MNT.ROLE_LABEL = Object.fromEntries(MNT.ROLES.map((r) => [r.key, r.label]));
 // doubt (visible, dimmed); below 0.4 not relevant. A summary up front ("De zaak
 // in het kort") is never kern: the model rates those as answers (tested: 0.90)
 // although they only announce the outcome.
-MNT.RELEVANT = 0.7;
-MNT.DOUBT = 0.4;
-MNT.ANSWER = 0.6;
 MNT.SUMMARY_SECTION = /in het kort|samenvatting|inleiding|waar gaat (de zaak|het) over/i;
+
+// Strictness, set on the options page: every threshold moves by the same shift,
+// so "Standaard" is exactly the tested behaviour and the main cut-off (0.6)
+// becomes 0.4 ("Meer zien") or 0.8 ("Minder zien").
+MNT.STRICTNESS = { meer: -0.2, standaard: 0, minder: 0.2 };
+MNT.shift = 0;
+MNT.setStrictness = (key) => (MNT.shift = MNT.STRICTNESS[key] ?? 0);
+MNT.at = (base) => Math.min(0.95, Math.max(0.05, base + MNT.shift));
+Object.defineProperties(MNT, {
+  RELEVANT: { get: () => MNT.at(0.7), configurable: true },
+  DOUBT: { get: () => MNT.at(0.4), configurable: true },
+  ANSWER: { get: () => MNT.at(0.6), configurable: true },
+});
 
 MNT.tierOf = (r) => {
   if (!r) return "pending";
@@ -38,16 +48,16 @@ MNT.tierOf = (r) => {
       // part is always kern, and a party's argument or a recounted finding
       // never is, however firmly the model rates it as the court's own.
       if (r.role === "beslissing") return "kern";
-      if (r.own >= 0.6 && r.substance >= 0.5 && r.bearing >= 0.5 && (r.role === "kader" || r.role === "toepassing") && !r.summary) return "kern";
-      if (r.own >= 0.6 && r.substance >= 0.5) return "rel";
+      if (r.own >= MNT.at(0.6) && r.substance >= MNT.at(0.5) && r.bearing >= MNT.at(0.5) && (r.role === "kader" || r.role === "toepassing") && !r.summary) return "kern";
+      if (r.own >= MNT.at(0.6) && r.substance >= MNT.at(0.5)) return "rel";
       return "low";
     }
-    if (r.own >= 0.6 && r.substance >= 0.6 && r.bearing >= 0.5 && !r.summary) return "kern";
-    if ((r.own >= 0.6 && r.substance >= 0.5) || r.role === "beslissing") return "rel";
+    if (r.own >= MNT.at(0.6) && r.substance >= MNT.at(0.6) && r.bearing >= MNT.at(0.5) && !r.summary) return "kern";
+    if ((r.own >= MNT.at(0.6) && r.substance >= MNT.at(0.5)) || r.role === "beslissing") return "rel";
     return "low";
   }
-  if (r.answer >= MNT.ANSWER && r.relevant >= 0.5 && !r.summary) return "kern";
-  if (r.relevant >= MNT.RELEVANT || (r.answer >= MNT.ANSWER && r.relevant >= 0.5)) return "rel";
+  if (r.answer >= MNT.ANSWER && r.relevant >= MNT.at(0.5) && !r.summary) return "kern";
+  if (r.relevant >= MNT.RELEVANT || (r.answer >= MNT.ANSWER && r.relevant >= MNT.at(0.5))) return "rel";
   if (r.relevant >= MNT.DOUBT) return "doubt";
   return "low";
 };

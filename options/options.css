@@ -173,6 +173,37 @@ kbd {
 .check input { margin-top: 4px; accent-color: var(--mnt-accent); }
 .check strong { display: block; font-weight: 500; }
 .check em { display: block; font-style: normal; font-size: var(--mnt-text-sm); color: var(--mnt-muted); }
+.strictness {
+  margin: 18px 0 0;
+  padding: 16px 0 0;
+  border: 0;
+  border-top: 1px solid var(--mnt-line);
+}
+.strictness legend { padding: 0; float: left; width: 100%; margin-bottom: 10px; }
+.strictness legend strong { display: block; font-weight: 500; }
+.strictness legend em { display: block; font-style: normal; font-size: var(--mnt-text-sm); color: var(--mnt-muted); }
+.seg {
+  clear: both;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--mnt-line);
+}
+.seg label { position: relative; cursor: pointer; }
+.seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.seg span {
+  display: block;
+  padding: 6px 10px;
+  border-radius: 999px;
+  text-align: center;
+  font-size: var(--mnt-text-sm);
+  color: var(--mnt-muted);
+  transition: background var(--mnt-duration-fast, 150ms), color var(--mnt-duration-fast, 150ms);
+}
+.seg input:checked + span { background: var(--mnt-surface); color: var(--mnt-text); font-weight: 500; box-shadow: var(--mnt-shadow-soft); }
+.seg input:focus-visible + span { outline: 2px solid var(--mnt-accent); outline-offset: 1px; }
 .ad {
   display: flex;
   align-items: center;
