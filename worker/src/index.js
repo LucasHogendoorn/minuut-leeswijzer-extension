@@ -43,6 +43,9 @@ const LIMITS = {
   state: 30_000, // the gateway refuses (429) from roughly 30-40k characters
   sentences: 40,
   sentence: 1_500,
+  // POST /v1/lookup: cached answers for up to 100 r.o.'s of one ruling at once.
+  lookupBody: 512_000, // bytes; hashing and parsing this much stays well under 10 ms CPU
+  lookupItems: 100,
 };
 
 // ---- The only questions this Worker will put to Jev -------------------------------
@@ -396,11 +399,11 @@ function build(body) {
   };
 }
 
-async function readBody(request) {
+async function readBody(request, max = LIMITS.body) {
   const declared = Number(request.headers.get("Content-Length") ?? 0);
-  if (declared > LIMITS.body) return null;
+  if (declared > max) return null;
   const text = await request.text();
-  if (text.length > LIMITS.body) return null;
+  if (text.length > max) return null;
   try {
     return JSON.parse(text);
   } catch {
@@ -461,7 +464,8 @@ export class Limiter extends DurableObject {
   }
 
   // `counts`: anonymous daily counts a Worker hands over (global object only).
-  take(windows, counts) {
+  // `weight`: how many calls this request stands for (a lookup of n r.o.'s).
+  take(windows, counts, weight = 1) {
     if (counts) this.counters.add(counts);
     const now = Math.floor(Date.now() / 1000);
     const horizon = Math.max(...windows.map((w) => w.ms)) / 1000;
@@ -469,9 +473,9 @@ export class Limiter extends DurableObject {
     for (const w of windows) {
       let n = 0;
       for (const [sec, count] of this.buckets) if (sec > now - w.ms / 1000) n += count;
-      if (n >= w.limit) return false;
+      if (n + weight > w.limit) return false;
     }
-    this.buckets.set(now, (this.buckets.get(now) ?? 0) + 1);
+    this.buckets.set(now, (this.buckets.get(now) ?? 0) + weight);
     return true;
   }
 
@@ -493,9 +497,12 @@ async function clientKey(ip, salt) {
 
 const globalLimiter = (env) => env.LIMITER.get(env.LIMITER.idFromName("global"));
 
-async function rateLimited(env, ip) {
+// `weight` counts against the client's limits: a lookup of n r.o.'s costs the
+// same as n judge calls, so it never buys more cache reads than judging would.
+// The global limit caps spend on Jev; a lookup never calls Jev, so it takes 1.
+async function rateLimited(env, ip, weight = 1) {
   const client = env.LIMITER.get(env.LIMITER.idFromName(`c:${await clientKey(ip, env.RL_SALT ?? "")}`));
-  const [okClient, okGlobal] = await Promise.all([client.take(PER_CLIENT), globalLimiter(env).take(GLOBAL, drain())]);
+  const [okClient, okGlobal] = await Promise.all([client.take(PER_CLIENT, undefined, weight), globalLimiter(env).take(GLOBAL, drain())]);
   const refused = !(okClient && okGlobal);
   if (refused) count("refused:rate_limit");
   return refused;
@@ -525,6 +532,51 @@ async function ping(request, env, origin) {
   return new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, ...corsHeaders(origin) } });
 }
 
+// POST /v1/lookup {kind, court?, lang?, items: [{state, sentences?}]}: the
+// cached answers for many r.o.'s of one ruling in one request, null where
+// nothing is cached. Cache only: it never calls Jev and never writes. Only the
+// kinds asked without a question exist here, so no question field is accepted;
+// each item is validated exactly like a judge call, and the answers returned are
+// the ones a judge call with that item would return from the cache. A client
+// only gets answers for text it sends itself.
+async function lookup(request, env, origin) {
+  const body = await readBody(request, LIMITS.lookupBody);
+  if (body === null) return fail(413, "Verzoek is te groot.", "too_large", origin);
+  if (!body || typeof body !== "object" || Array.isArray(body)) return fail(400, "Body moet een JSON-object zijn.", "invalid_request", origin);
+  const { kind, court, lang, items } = body;
+  if (Object.keys(body).some((k) => !["kind", "court", "lang", "items"].includes(k))) return fail(400, "Onbekende velden.", "invalid_request", origin);
+  if (kind !== "core" && kind !== "sentences") return fail(400, "Onbekende soort beoordeling.", "invalid_request", origin);
+  if (!Array.isArray(items) || items.length < 1 || items.length > LIMITS.lookupItems) return fail(400, "Onverwacht aantal passages.", "invalid_request", origin);
+  const built = [];
+  for (const item of items) {
+    if (!item || typeof item !== "object" || Array.isArray(item) || Object.keys(item).some((k) => k !== "state" && k !== "sentences")) {
+      return fail(400, "Onverwachte passage.", "invalid_request", origin);
+    }
+    const b = build({ kind, state: item.state, sentences: item.sentences, court, lang });
+    if (typeof b === "string") return fail(400, b, "invalid_request", origin);
+    built.push(b);
+  }
+
+  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+  if (await rateLimited(env, ip, items.length)) {
+    return fail(429, "Even rustig aan: te veel verzoeken. Probeer het zo opnieuw.", "rate_limited", origin, { "Retry-After": "10" });
+  }
+  count(`lookup:${kind}`);
+  if (!env.DB) return json(200, { answers: items.map(() => null) }, origin);
+
+  // One lookup has one kind, court and language, so one template.
+  const slots = await Promise.all(built.map(cacheSlot));
+  const answers = await readAnswers(env.DB, slots[0].tpl, slots.map((s) => s.key)).catch(() => (count("cache:error"), items.map(() => null)));
+  const hits = answers.filter(Boolean).length;
+  // Misses are counted by the judge call the client makes next.
+  if (hits) {
+    count("cache:hit", hits);
+    count(`judge:${kind}`, hits);
+    count(`src:${source(body)}`, hits);
+  }
+  return json(200, { answers }, origin);
+}
+
 // Which template set a judgement used: Dutch courts, or EU case law per language.
 const source = (body) => (body.lang ? `eu_${body.lang}` : EU_COURTS.has(body.court) || body.court === ADVISER ? "eu_nl" : "nl");
 
@@ -536,7 +588,8 @@ export default {
     if (url.pathname === "/health" && request.method === "GET") return json(200, { ok: true }, origin);
     if (url.pathname === "/v1/stats") return (await statsResponse(request, env, url, globalLimiter(env))) ?? fail(404, "Niet gevonden.", "not_found", null);
     const isPing = url.pathname === "/v1/ping";
-    if (url.pathname !== "/v1/judge" && !isPing) return fail(404, "Niet gevonden.", "not_found", origin);
+    const isLookup = url.pathname === "/v1/lookup";
+    if (url.pathname !== "/v1/judge" && !isPing && !isLookup) return fail(404, "Niet gevonden.", "not_found", origin);
     if (request.method === "OPTIONS") {
       return origin ? new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, ...corsHeaders(origin) } }) : fail(403, "Niet toegestaan.", "forbidden", null);
     }
@@ -544,6 +597,7 @@ export default {
     if (!origin) return fail(403, "Alleen voor de Leeswijzer-extensie.", "forbidden", null);
     if (!(request.headers.get("Content-Type") ?? "").startsWith("application/json")) return fail(415, "Verwacht JSON.", "invalid_request", origin);
     if (isPing) return ping(request, env, origin);
+    if (isLookup) return lookup(request, env, origin);
 
     const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
     if (await rateLimited(env, ip)) {
