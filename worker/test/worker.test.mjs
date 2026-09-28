@@ -260,9 +260,16 @@ test("limiter order: a refused client never touches the global object, then wait
   // periodic report: none per call to the global object.
   assert.deepEqual([...new Set(env.LIMITER.calls)].sort(), ["c.take", "global.report"]);
   assert.equal(env.LIMITER.calls.filter((c) => c === "global.report").length, 1, "one report per 10 s per isolate");
-  const before = env.LIMITER.calls.length;
+  // The first refusal may come from the isolate's token bucket (Retry-After 1 s,
+  // no negative cache yet); the next call that reaches the Durable Object is
+  // refused there and puts the key in the negative cache. From then on a flood
+  // costs no Durable Object requests.
+  let before = env.LIMITER.calls.length;
   for (let i = 0; i < 200; i++) assert.equal((await worker.fetch(post("/v1/judge", CORE(5000 + i), { ip }), env, ctx)).status, 429);
-  assert.equal(env.LIMITER.calls.length, before, "refused flood: no Durable Object requests");
+  assert.ok(env.LIMITER.calls.length - before <= 1, "at most one Durable Object request for a refused flood");
+  before = env.LIMITER.calls.length;
+  for (let i = 0; i < 300; i++) assert.equal((await worker.fetch(post("/v1/judge", CORE(6000 + i), { ip }), env, ctx)).status, 429);
+  assert.equal(env.LIMITER.calls.length, before, "in the negative cache: no Durable Object requests");
   await ctx.settle();
 });
 
