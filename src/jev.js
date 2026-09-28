@@ -126,6 +126,9 @@ MNT.pool = async (items, task, isCancelled, concurrency = CONCURRENCY) => {
 
 const MAX_SENTENCES = 40;
 const MAX_SENTENCE_CHARS = 1500;
+// All sentences of one r.o. together: no more than a core call carries as
+// state (MAX_SEGMENT_CHARS). The Worker refuses more than 24,000.
+const MAX_SENTENCES_TOTAL = 20000;
 // "art. 7:213 BW", "mr. Jansen", "r.o. 3.4", "vgl. HR" must not end a sentence.
 const ABBREV = /(?:^|[\s(])(?:mr|art|artt|jo|vgl|nr|nrs|blz|p|pp|r\.o|rov|bijv|resp|prof|dr|o\.a|e\.a|i\.c|c\.q|t\.a\.v|m\.b\.t|z\.g|n\.v\.t|jl|lid|sub|ca|HR|EHRM|BW|Rv|Sr|Sv|Awb)\.$/i;
 
@@ -143,7 +146,12 @@ MNT.splitSentences = (text) => {
     }
     out.push(para.slice(start).trim());
   }
-  return out.filter((s) => s.length >= 12).slice(0, MAX_SENTENCES).map((s) => s.slice(0, MAX_SENTENCE_CHARS));
+  let total = 0;
+  return out
+    .filter((s) => s.length >= 12)
+    .slice(0, MAX_SENTENCES)
+    .map((s) => s.slice(0, MAX_SENTENCE_CHARS))
+    .filter((s) => (total += s.length) <= MAX_SENTENCES_TOTAL);
 };
 
 MNT.sentenceState = (meta, seg, question) =>

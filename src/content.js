@@ -87,6 +87,11 @@
 
   // ---- Ruling ---------------------------------------------------------------
 
+  // Errors that stop a run and show their message in the panel: a refused
+  // request, the server being unavailable (503) or this address sending too
+  // much (429). Other errors only mark the r.o. or result that failed.
+  const stopsRun = (err) => ["request", "unavailable", "rate_limited"].includes(err?.code);
+
   // A ruling or a result list is open: the service worker sends the day's one
   // anonymous "active" ping if it has not yet (src/background.js keeps the date).
   function markActive() {
@@ -239,7 +244,7 @@
       (err) => {
         if (cancelled()) return;
         S.verdict = { error: true };
-        if (err.code === "request") {
+        if (stopsRun(err)) {
           stopped = true;
           S.error = err;
         }
@@ -290,7 +295,7 @@
         } catch (err) {
           if (cancelled()) return;
           seg.result = { error: err.message };
-          if (err.code === "request") {
+          if (stopsRun(err)) {
             stopped = true;
             S.error = err;
           }
@@ -485,6 +490,7 @@
   async function judgeHits(hits, question) {
     const started = performance.now();
     for (const hit of hits) ctx.hitVerdicts.set(hit.ecli, { pending: true });
+    let stopped = false;
     await MNT.pool(
       hits,
       async (hit) => {
@@ -493,12 +499,20 @@
           if (ctx.hitsQuestion === question) ctx.hitVerdicts.set(hit.ecli, { p: MNT.unit(d.answers?.over?.probability) });
         } catch (err) {
           if (ctx.hitsQuestion === question) ctx.hitVerdicts.set(hit.ecli, { error: err.message });
-          if (err.code === "request") S.error = err;
+          if (stopsRun(err)) {
+            stopped = true;
+            S.error = err;
+          }
         }
         scanHits();
       },
-      () => ctx.hitsQuestion !== question,
+      () => stopped || ctx.hitsQuestion !== question,
     );
+    // Stopped (server unavailable, too many requests): the hits not judged
+    // show the same error instead of waiting forever.
+    if (stopped && ctx.hitsQuestion === question) {
+      for (const hit of hits) if (ctx.hitVerdicts.get(hit.ecli)?.pending) ctx.hitVerdicts.set(hit.ecli, { error: S.error?.message ?? "" });
+    }
     if (S.progress) S.progress.ms = performance.now() - started;
     scanHits();
   }

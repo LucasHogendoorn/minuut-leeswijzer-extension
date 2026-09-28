@@ -10,7 +10,8 @@
 // Worker answers only the store extension's origin), not on host permissions.
 const PRODUCTION_ENDPOINT = "https://leeswijzer-api.minuut.eu/v1/judge";
 const CACHE_PREFIX = "jev:";
-const MAX_ATTEMPTS = 4;
+// Attempts for a call Jev itself sheds (429 "busy"); see callJev.
+const MAX_BUSY_ATTEMPTS = 4;
 
 // Content scripts may read the session store (the question of this session).
 chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_AND_UNTRUSTED_CONTEXTS" });
@@ -98,27 +99,42 @@ class JevError extends Error {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Retries only what clears by itself, so an outage is not made worse:
+//   - 429 "busy" (Jev shedding a burst): up to MAX_BUSY_ATTEMPTS, after the
+//     Retry-After the Worker sends;
+//   - a network error: one more try;
+//   - 503 / "unavailable" (the server is down or over its daily or global
+//     limit), 429 "rate_limited" (this address sent too much) and every other
+//     error: no retry; the panel shows the message and offers "Opnieuw".
 async function callJev(body) {
   const url = await endpoint();
-  let lastError;
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+  let networkRetried = false;
+  for (let attempt = 1; ; attempt++) {
     let res;
     try {
       res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     } catch {
-      lastError = new JevError("network", "Geen verbinding met de Leeswijzer-server.");
-      await sleep(400 * 2 ** attempt);
+      if (networkRetried) throw new JevError("network", "Geen verbinding met de Leeswijzer-server.");
+      networkRetried = true;
+      await sleep(800 + Math.random() * 400);
       continue;
     }
     if (res.ok) return res.json();
     const detail = await res.json().catch(() => ({}));
     if (res.status === 400) throw new JevError("request", detail.message ?? "Het verzoek werd geweigerd.");
-    lastError = new JevError(res.status === 429 ? "busy" : "upstream", detail.message ?? `De server antwoordde ${res.status}.`);
-    // Short, jittered retries: the gateway's 503/429 under bursts clears fast.
+    if (res.status === 503 || detail.error_type === "unavailable") {
+      throw new JevError("unavailable", "Leeswijzer is even niet beschikbaar. Probeer het later opnieuw.");
+    }
+    if (res.status === 429 && detail.error_type === "rate_limited") {
+      throw new JevError("rate_limited", "Even rustig aan: te veel verzoeken. Probeer het zo opnieuw.");
+    }
+    const busy = res.status === 429 && detail.error_type === "busy";
+    if (!busy) throw new JevError("upstream", detail.message ?? `De server antwoordde ${res.status}.`);
+    if (attempt >= MAX_BUSY_ATTEMPTS) throw new JevError("busy", detail.message ?? "Jev is even niet bereikbaar.");
+    // Short, jittered retries: the gateway's 429/503 under bursts clears fast.
     const retryAfter = Number(res.headers.get("retry-after"));
-    await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : (200 + Math.random() * 300) * 2 ** attempt);
+    await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter, 10) * 1000 : (200 + Math.random() * 300) * 2 ** attempt);
   }
-  throw lastError;
 }
 
 const KINDS = new Set(["core", "segment", "ruling", "sentences"]);
