@@ -8,7 +8,8 @@ import { DurableObject } from "cloudflare:workers";
 //   - the typed questions Jev answers are built HERE, from fixed templates; a
 //     client only picks one of four kinds and supplies the legal question
 //     (optional for "core") and the public ruling text, so the endpoint cannot be used to ask Jev
-//     anything else;
+//     anything else; EU case law picks a template set per language ("nl" or
+//     "en", a closed field), never free text;
 //   - strict size limits on every field and on the raw body;
 //   - exact per-client rate limits (burst and per minute) plus a global limit
 //     that caps spend if many IPs join in (Durable Objects, memory only);
@@ -56,22 +57,13 @@ const EU_COURTS = new Set(["het Hof van Justitie", "het Gerecht"]);
 // proposes take the place of a court's judgement and decision.
 const ADVISER = "de advocaat-generaal";
 
-// "Eigen oordeel" per speaker. The Dutch courts keep their tested wording; the
-// EU courts answer a referring court; the advocate general proposes.
+// "Eigen oordeel" for the Dutch courts: their tested wording. EU case law has
+// its own template sets below.
 function ownQuestion(court) {
-  if (court === ADVISER) {
-    return {
-      instructions: `Geeft ${court} in deze passage zijn eigen analyse of oordeel, of formuleert hij zelf een rechtsregel (maatstaf) die hij het Hof voorstelt?`,
-      true: `${court} analyseert, beoordeelt of formuleert in eigen woorden de regel of het antwoord dat hij voorstelt`,
-      false: "alleen feiten, standpunten van partijen, lidstaten of instellingen, de prejudiciële vragen, citaten van wetgeving of rechtspraak, of wat de verwijzende rechter of een lagere rechter heeft overwogen (ook als die redenering hier wordt weergegeven)",
-    };
-  }
   return {
     instructions: `Geeft ${court} in deze passage zelf een oordeel of formuleert ${court} zelf een rechtsregel (maatstaf)?`,
     true: `${court} oordeelt, beslist of formuleert de regel die hij toepast, in eigen woorden`,
-    false: EU_COURTS.has(court)
-      ? "alleen feiten, standpunten of vorderingen van partijen, lidstaten of instellingen, de prejudiciële vragen, middelen of grieven, citaten, of wat de verwijzende rechter of een lagere rechter heeft overwogen of beslist (ook als die redenering hier wordt weergegeven)"
-      : "alleen feiten, standpunten of vorderingen van partijen, klachten of middelen, citaten, of wat een lagere rechter heeft overwogen of beslist (ook als die redenering hier wordt weergegeven)",
+    false: "alleen feiten, standpunten of vorderingen van partijen, klachten of middelen, citaten, of wat een lagere rechter heeft overwogen of beslist (ook als die redenering hier wordt weergegeven)",
   };
 }
 
@@ -80,9 +72,8 @@ const QUESTIONS = {
   // One rechtsoverweging. Two sharp yes/no questions instead of one broad
   // "does it touch the question" (tested on 28 r.o.'s: the broad version marked
   // party claims and the lower court's ruling as core).
-  segment: (q, _sentences, speaker) => {
-    // Named only for EU case law, where the speaker may be an advocate general.
-    const court = EU_COURTS.has(speaker) || speaker === ADVISER ? speaker : "de rechter";
+  segment: (q) => {
+    const court = "de rechter";
     return {
       onderwerp: {
         type: "boolean",
@@ -110,7 +101,6 @@ const QUESTIONS = {
   // reasoning quoted in an appeal is not mistaken for the court's own.
   core: (_q, _sentences, court) => {
     const own = ownQuestion(court);
-    const adviser = court === ADVISER;
     return {
       eigen: {
         type: "boolean",
@@ -119,11 +109,9 @@ const QUESTIONS = {
       },
       dragend: {
         type: "boolean",
-        instructions: adviser
-          ? "Draagt deze passage het antwoord dat de advocaat-generaal voorstelt: formuleert zij de maatstaf waarop dat antwoord berust, of past zij die maatstaf toe op deze zaak?"
-          : "Draagt deze passage de beslissing: formuleert zij de maatstaf waarop de uitkomst berust, of past zij die maatstaf toe op deze zaak?",
+        instructions: "Draagt deze passage de beslissing: formuleert zij de maatstaf waarop de uitkomst berust, of past zij die maatstaf toe op deze zaak?",
         criteria: {
-          true: adviser ? "het voorgestelde antwoord rust op deze maatstaf of op deze toepassing ervan" : "de uitkomst rust op deze maatstaf of op deze toepassing ervan (ratio decidendi)",
+          true: "de uitkomst rust op deze maatstaf of op deze toepassing ervan (ratio decidendi)",
           false: "ten overvloede, terzijde, achtergrond, samenvatting, of alleen de slotsom zonder redenering",
         },
       },
@@ -160,6 +148,160 @@ const QUESTIONS = {
     },
   }),
 };
+
+// ---- EU case law: one template set per language --------------------------------------
+// Judgments of the Court of Justice and the General Court and opinions of the
+// advocates general (Curia, EUR-Lex) are built differently from a Dutch ruling:
+// the question referred and its reformulation, the observations of governments
+// and the Commission, quoted EU and national law, settled case law restated as
+// the rule, the answer paragraph ("must be interpreted as ..."), the operative
+// part. Each set describes those parts in the language of the page; the
+// speaker is still the closed `court` value, named here in that language.
+// Tuned on a hand-labelled set of 12 documents (6 NL, 6 EN).
+
+const EU_SPEAKER = {
+  nl: { "het Hof van Justitie": "het Hof", "het Gerecht": "het Gerecht", "de advocaat-generaal": "de advocaat-generaal", "de rechter": "de rechter" },
+  en: { "het Hof van Justitie": "the Court", "het Gerecht": "the General Court", "de advocaat-generaal": "the Advocate General", "de rechter": "the court" },
+};
+
+const EU_ROLES = {
+  nl: {
+    kader: "juridisch kader: de regel in algemene termen: aangehaalde of weergegeven bepalingen van Unierecht, overwegingen van een richtlijn of verordening, nationaal recht, of vaste rechtspraak van het Hof die in algemene bewoordingen wordt herhaald, los van de feiten van deze zaak",
+    toepassing: "toepassing: het Hof, het Gerecht of de advocaat-generaal past de regel toe op de verwezen situatie, de nationale regeling, de tekens, de documenten of het bestreden besluit en trekt daaruit een conclusie; ook de alinea die het antwoord op een prejudiciële vraag geeft („moet aldus worden uitgelegd dat ...”) of over een middel oordeelt („het middel moet worden aanvaard”, „het besluit moet nietig worden verklaard”)",
+    obiter: "ten overvloede of terzijde: een bevestiging („hoe dan ook”, „bovendien geldt”), een kanttekening voor andere gevallen, een opmerking over iets waar de verwijzende rechter niet om heeft gevraagd; niet nodig voor het antwoord",
+    stellingen: "standpunten: wat verzoeker, verweerder, de regeringen, de Commissie, het EUIPO of een interveniënt aanvoert, betoogt of vordert; de conclusies van partijen, de middelen en argumenten; ook wanneer de advocaat-generaal ze samenvat",
+    feiten: "feiten: het hoofdgeding, de gebeurtenissen, de overeenkomst, het besluit van de instantie, en wat de kamer van beroep of de instelling heeft vastgesteld of overwogen (weergegeven, niet beoordeeld)",
+    proces: "procedure: het voorwerp van het verzoek (punt 1), het verloop van de nationale procedure en van de procedure voor het Hof of het Gerecht, de twijfels van de verwijzende rechter, de prejudiciële vragen zoals gesteld en de herformulering ervan („met zijn eerste vraag wenst de verwijzende rechter in wezen te vernemen ...”), bevoegdheid, ontvankelijkheid, de volgorde van behandeling, kosten, en de inleiding van een conclusie",
+    beslissing: "dictum: het Hof „verklaart voor recht”, het Gerecht „verklaart en beslist” (vernietigt, verwerpt, verwijst in de kosten), of de slotconclusie van de advocaat-generaal met de antwoorden die hij het Hof in overweging geeft",
+  },
+  en: {
+    kader: "legal framework: the rule in general terms: quoted or restated provisions of EU law, recitals of a directive or regulation, national law, or settled case-law of the Court restated in general words, apart from the facts of this case",
+    toepassing: "application: the Court, the General Court or the Advocate General applies the rule to the situation referred, the national legislation, the signs, the documents or the contested decision and draws a conclusion from it; also the paragraph that gives the answer to a question referred ('must be interpreted as meaning that ...') or rules on a plea ('the plea must be upheld', 'the decision must be annulled')",
+    obiter: "obiter: a corroborating aside ('in any event', 'moreover'), a caveat for other cases, a remark on something the referring court did not ask about; not needed for the answer",
+    stellingen: "submissions: what the applicant, the defendant, the governments, the Commission, EUIPO or an intervener submits, argues or claims; the forms of order sought, the pleas in law and arguments; also as summarised by the Advocate General",
+    feiten: "facts: the dispute in the main proceedings, the events, the contract, the decision of the authority, and what the Board of Appeal or the institution found or considered (recounted, not assessed)",
+    proces: "procedure: the subject of the request (paragraph 1), the course of the national proceedings and of the procedure before the Court or the General Court, the referring court's doubts, the questions referred as worded and their reformulation ('by its first question, the referring court asks, in essence, ...'), jurisdiction, admissibility, the order of examination, costs, and the introduction of an opinion",
+    beslissing: "operative part: the Court 'hereby rules', the General Court 'hereby' annuls, dismisses or orders costs, or the final conclusion of the Advocate General proposing the answers to the Court",
+  },
+};
+
+const EU_TEXT = {
+  nl: {
+    own: (c, ag) => ({
+      instructions: `Bevat deze passage een eigen overweging van ${c}: een oordeel, een uitlegging, een beoordeling of een regel die ${c} zelf formuleert of toepast?`,
+      true: `${c} overweegt, oordeelt, legt uit, beoordeelt of concludeert zelf, ook wanneer ${ag ? "hij" : "het"} daarbij vaste rechtspraak herhaalt en toepast`,
+      false: "alleen aangehaalde of weergegeven bepalingen, de feiten van het hoofdgeding, het verloop van de procedure, de prejudiciële vragen en hun herformulering, standpunten van partijen, regeringen, de Commissie of een instelling, wat de verwijzende rechter, de kamer van beroep of een lagere rechter heeft overwogen, of de aankondiging van wat hierna wordt onderzocht",
+    }),
+    bearing: (c, ag) => ({
+      instructions: `Is deze passage een schakel in de redenering die tot ${ag ? "het antwoord dat de advocaat-generaal voorstelt" : `het antwoord of de beslissing van ${c}`} leidt: de regel of maatstaf waarop het antwoord berust, de toepassing daarvan op de verwezen situatie of het bestreden besluit, of de conclusie die daaruit wordt getrokken?`,
+      true: "het antwoord op een vraag of het oordeel over een middel berust hierop: de maatstaf, de toepassing ervan, de gevolgtrekking („daaruit volgt”, „bijgevolg”, „moet aldus worden uitgelegd”, „het middel moet worden aanvaard”, „het besluit moet nietig worden verklaard”) of het dictum",
+      false: "achtergrond die het antwoord niet gebruikt, een bevestiging ten overvloede („hoe dan ook”), een opmerking over een niet gestelde vraag, ontvankelijkheid, kosten, de aankondiging van de volgorde van behandeling, of alleen een samenvatting",
+    }),
+    substance: {
+      instructions: "Gaat deze passage over de inhoud van de zaak: de uitlegging van het Unierecht, de toetsing van de nationale regeling of van het bestreden besluit, of de beoordeling van een middel?",
+      true: "materieel: wat het Unierecht inhoudt en wat dat betekent voor de verwezen situatie, de nationale regeling, het bestreden besluit of het gevorderde (ook de vernietiging, herziening of afwijzing zelf)",
+      false: "procedureel: bevoegdheid, ontvankelijkheid, het verloop van de procedure, de volgorde van behandeling, proceskosten, of een aankondiging van wat volgt",
+    },
+    role: "Wat voor passage is dit binnen het arrest of de conclusie?",
+    topic: (q, c) => ({
+      instructions: `Gaat deze passage over dezelfde juridische kwestie als de rechtsvraag? Rechtsvraag: "${q}"`,
+      true: `de passage gaat precies over deze kwestie: de Unierechtelijke regel die erop ziet, de feiten of de nationale regeling die voor deze kwestie beslissend zijn, of wat partijen, regeringen, de Commissie, de verwijzende rechter of ${c} daarover zeggen`,
+      false: "een andere prejudiciële vraag, een ander middel, of alleen procedure, ontvankelijkheid, kosten of algemene achtergrond, ook als dezelfde partijen of woorden voorkomen",
+    }),
+    answer: (q, c) => ({
+      instructions: `Geeft ${c} in deze passage zelf (een deel van) het antwoord op de rechtsvraag: de maatstaf die ${c} daarvoor hanteert, de toepassing ervan, of het antwoord zelf? Rechtsvraag: "${q}"`,
+      true: `een eigen overweging van ${c} die deze rechtsvraag geheel of ten dele beantwoordt: de regel, de toepassing of het antwoord („moet aldus worden uitgelegd dat ...”)`,
+      false: "aangehaalde bepalingen, feiten, de vraag zoals gesteld of geherformuleerd, standpunten van partijen, regeringen of de Commissie, wat de verwijzende rechter of de kamer van beroep meent, of een overweging over een andere vraag",
+    }),
+    ruling: (q) => ({
+      instructions: `Behandelt dit arrest of deze conclusie de volgende rechtsvraag, zodat een advocaat het stuk moet lezen? Rechtsvraag: "${q}"`,
+      true: "het Hof, het Gerecht of de advocaat-generaal beoordeelt deze vraag of een wezenlijk onderdeel ervan, ook als het antwoord de vraag maar voor een deel dekt",
+      false: "het stuk gaat over iets anders of noemt het onderwerp alleen terloops",
+    }),
+    sentence: (q) =>
+      q
+        ? "Welke zin uit dit punt beantwoordt de rechtsvraag het meest direct (de overweging of de maatstaf, niet de feiten of een aangehaalde bepaling)?"
+        : "Welke zin uit dit punt bevat de kern van de overweging (het oordeel, de uitlegging of de maatstaf waarop het antwoord berust, niet de feiten of een aangehaalde bepaling)?",
+  },
+  en: {
+    own: (c, ag) => ({
+      instructions: `Does this passage contain ${c}'s own reasoning: a finding, an interpretation, an assessment or a rule that ${c} itself states or applies?`,
+      true: `${c} itself reasons, finds, interprets, assesses or concludes, including where ${ag ? "he or she" : "it"} restates and applies settled case-law`,
+      false: "only quoted or restated provisions, the facts of the main proceedings, the course of the procedure, the questions referred and their reformulation, submissions of the parties, governments, the Commission or an institution, what the referring court, the Board of Appeal or a lower court considered, or an announcement of what will be examined next",
+    }),
+    bearing: (c, ag) => ({
+      instructions: `Is this passage a step in the reasoning that leads to ${ag ? "the answer the Advocate General proposes" : `${c}'s answer or ruling`}: the rule or test on which the answer rests, its application to the situation referred or the contested decision, or the conclusion drawn from it?`,
+      true: "the answer to a question or the ruling on a plea rests on this: the test, its application, the inference ('it follows', 'consequently', 'must be interpreted as meaning', 'the plea must be upheld', 'the decision must be annulled') or the operative part",
+      false: "background the answer does not use, a corroborating aside ('in any event'), a remark on a question not referred, admissibility, costs, an announcement of the order of examination, or a mere summary",
+    }),
+    substance: {
+      instructions: "Is this passage about the substance of the case: the interpretation of EU law, the review of the national legislation or of the contested decision, or the assessment of a plea?",
+      true: "substantive: what EU law means and what that entails for the situation referred, the national legislation, the contested decision or the form of order sought (including the annulment, alteration or dismissal itself)",
+      false: "procedural: jurisdiction, admissibility, the course of the procedure, the order of examination, costs, or an announcement of what follows",
+    },
+    role: "What kind of passage is this within the judgment or opinion?",
+    topic: (q, c) => ({
+      instructions: `Is this passage about the same legal issue as the question? Question: "${q}"`,
+      true: `the passage deals with precisely this issue: the rule of EU law that governs it, the facts or national legislation decisive for it, or what the parties, governments, the Commission, the referring court or ${c} say about it`,
+      false: "another question referred, another plea, or only procedure, admissibility, costs or general background, even where the same parties or words appear",
+    }),
+    answer: (q, c) => ({
+      instructions: `Does ${c} itself give (part of) the answer to the question in this passage: the test ${c} applies for it, its application, or the answer itself? Question: "${q}"`,
+      true: `${c}'s own reasoning that answers this question in whole or in part: the rule, its application or the answer ('must be interpreted as meaning that ...')`,
+      false: "quoted provisions, facts, the question as referred or reformulated, submissions of the parties, governments or the Commission, the view of the referring court or the Board of Appeal, or reasoning on another question",
+    }),
+    ruling: (q) => ({
+      instructions: `Does this judgment or opinion deal with the following question, so that a lawyer should read it? Question: "${q}"`,
+      true: "the Court, the General Court or the Advocate General rules on this question or on an essential part of it, even where the answer covers the question only in part",
+      false: "the document is about something else or mentions the subject only in passing",
+    }),
+    sentence: (q) =>
+      q
+        ? "Which sentence of this paragraph answers the question most directly (the reasoning or the test, not the facts or a quoted provision)?"
+        : "Which sentence of this paragraph carries the core of the reasoning (the finding, the interpretation or the test on which the answer rests, not the facts or a quoted provision)?",
+  },
+};
+
+function euQuestions(lang) {
+  const T = EU_TEXT[lang];
+  const roles = EU_ROLES[lang];
+  const name = (court) => EU_SPEAKER[lang][court] ?? EU_SPEAKER[lang]["de rechter"];
+  const rol = { type: "choice", instructions: T.role, criteria: roles };
+  return {
+    core: (_q, _sentences, court) => {
+      const c = name(court);
+      const ag = court === ADVISER;
+      const own = T.own(c, ag);
+      const bearing = T.bearing(c, ag);
+      return {
+        eigen: { type: "boolean", instructions: own.instructions, criteria: { true: own.true, false: own.false } },
+        dragend: { type: "boolean", instructions: bearing.instructions, criteria: { true: bearing.true, false: bearing.false } },
+        inhoud: { type: "boolean", instructions: T.substance.instructions, criteria: { true: T.substance.true, false: T.substance.false } },
+        rol,
+      };
+    },
+    segment: (q, _sentences, court) => {
+      const c = name(court);
+      const topic = T.topic(q, c);
+      const answer = T.answer(q, c);
+      return {
+        onderwerp: { type: "boolean", instructions: topic.instructions, criteria: { true: topic.true, false: topic.false } },
+        antwoord: { type: "boolean", instructions: answer.instructions, criteria: { true: answer.true, false: answer.false } },
+        rol,
+      };
+    },
+    ruling: (q) => {
+      const r = T.ruling(q);
+      return { over: { type: "boolean", instructions: r.instructions, criteria: { true: r.true, false: r.false } } };
+    },
+    sentences: (q, sentences) => ({
+      zin: { type: "choice", instructions: T.sentence(q), criteria: Object.fromEntries(sentences.map((s, i) => [`z${i + 1}`, s])) },
+    }),
+  };
+}
+
+// The closed `lang` field picks one of these; anything else is refused.
+const EU_QUESTIONS = { nl: euQuestions("nl"), en: euQuestions("en") };
 
 // ---- HTTP helpers ------------------------------------------------------------------------
 
@@ -208,10 +350,12 @@ const isText = (v, max) => typeof v === "string" && v.trim().length > 0 && v.len
 // Returns [questions, state] or an error message.
 function build(body) {
   if (!body || typeof body !== "object" || Array.isArray(body)) return "Body moet een JSON-object zijn.";
-  const extra = Object.keys(body).filter((k) => !["kind", "question", "state", "sentences", "court"].includes(k));
+  const extra = Object.keys(body).filter((k) => !["kind", "question", "state", "sentences", "court", "lang"].includes(k));
   if (extra.length) return `Onbekende velden: ${extra.slice(0, 3).join(", ")}.`;
-  const { kind, question = "", state, sentences, court } = body;
+  const { kind, question = "", state, sentences, court, lang } = body;
   if (!Object.hasOwn(QUESTIONS, kind)) return "Onbekende soort beoordeling.";
+  if (lang !== undefined && !Object.hasOwn(EU_QUESTIONS, lang)) return "Onbekende taal.";
+  if (lang !== undefined && court !== undefined && !(EU_COURTS.has(court) || court === ADVISER)) return "Taal hoort alleen bij Europese rechtspraak.";
   const needsQuestion = kind === "segment" || kind === "ruling";
   if (needsQuestion ? !isText(question, LIMITS.question) : typeof question !== "string" || question.length > LIMITS.question) {
     return `Rechtsvraag ontbreekt of is langer dan ${LIMITS.question} tekens.`;
@@ -225,7 +369,11 @@ function build(body) {
     return "Zinnen horen alleen bij soort 'sentences'.";
   }
   const q = question.replace(/["\n\r]+/g, " ").trim();
-  return [QUESTIONS[kind](q, sentences, court ?? "de rechter"), state];
+  // EU case law (a `lang`, or an EU speaker from a client that predates `lang`)
+  // gets the EU templates in the page's language; the Dutch courts keep theirs.
+  const eu = lang !== undefined || EU_COURTS.has(court) || court === ADVISER;
+  const set = eu ? EU_QUESTIONS[lang ?? "nl"] : QUESTIONS;
+  return [set[kind](q, sentences, court ?? "de rechter"), state];
 }
 
 async function readBody(request) {
