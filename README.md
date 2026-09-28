@@ -59,14 +59,16 @@ gebruikt.
 - **Wat er verstuurd wordt:** de rechtsvraag en de openbare tekst van de uitspraak. Zet
   daarom geen cliëntgegevens in de rechtsvraag.
 
-Omdat de code open is, is dit na te lezen: alles wat de extensie verstuurt, gaat via
-[`src/background.js`](src/background.js).
+Omdat de code open is, is dit na te lezen. Alles wat de extensie verstuurt, gaat via
+[`src/background.js`](src/background.js). Wat de server ermee doet, staat in
+[`worker/src/index.js`](worker/src/index.js): de vaste vragen aan het AI-model, de limieten,
+zero data retention, en dat er niets wordt opgeslagen of gelogd.
 
 ## Meebouwen
 
 De extensie is gewone JavaScript en CSS, zonder build-stap of dependencies. Laad deze map
-via `chrome://extensions` → *Uitgepakte extensie laden*. Hoe je een eigen server aansluit
-en waar alles zit, staat in [CONTRIBUTING.md](CONTRIBUTING.md).
+via `chrome://extensions` → *Uitgepakte extensie laden*. Hoe je de server lokaal draait en
+waar alles zit, staat in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Bugs, uitspraken die verkeerd worden ingedeeld en ideeën zijn welkom als
 [issue](../../issues).

@@ -1,0 +1,26 @@
+name = "minuut-leeswijzer"
+main = "src/index.js"
+compatibility_date = "2026-03-01"
+workers_dev = true
+
+# No request logging: Workers Logs and traces stay off.
+[observability]
+enabled = false
+
+# Pin the store extension(s) once published, e.g.
+#   ALLOWED_ORIGINS = "chrome-extension://abcdefghijklmnopabcdefghijklmnop"
+# Empty = any browser extension (development).
+[vars]
+ALLOWED_ORIGINS = "chrome-extension://djlkngghkpadabjgmegaeelmffhhljfe,chrome-extension://bobkkcopddkeckpomcpfdnocgkkihiep"
+
+# Rate limits: exact in-memory counters in a Durable Object (see Limiter in
+# src/index.js): per client 300/10 s and 1200/min, globally 12000/min.
+[[durable_objects.bindings]]
+name = "LIMITER"
+class_name = "Limiter"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Limiter"]
+
+# Secrets, set with: wrangler secret put AI_GATEWAY_API_KEY / wrangler secret put RL_SALT

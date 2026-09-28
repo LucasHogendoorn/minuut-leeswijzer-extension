@@ -4,15 +4,16 @@
 var MNT = (globalThis.MNT = globalThis.MNT || {});
 
 // The categories Jev chooses between, in reading order of a typical ruling
-// section. Order = order of the filter pills.
+// section. Order = order of the filter pills. The definitions Jev chooses by
+// live in the Worker (ROLES in worker/src/index.js).
 MNT.ROLES = [
-  { key: "kader", label: "Juridisch kader", short: "Kader", criterion: "juridisch kader: de rechtsregel of maatstaf die de rechter hanteert (wetsartikel, vaste rechtspraak, toetsingsmaatstaf), in algemene termen, los van de feiten van deze zaak" },
-  { key: "toepassing", label: "Toepassing juridisch kader", short: "Toepassing", criterion: "toepassing van het juridisch kader: de rechter weegt de feiten van deze zaak aan de hand van de regel of maatstaf en trekt een conclusie" },
-  { key: "obiter", label: "Obiter dictum", short: "Obiter", criterion: "obiter dictum: een oordeel ten overvloede of terzijde, niet nodig voor de beslissing" },
-  { key: "stellingen", label: "Stellingen partijen", short: "Stellingen", criterion: "stellingen van partijen: wat een partij stelt, aanvoert, betwist of vordert, of de grieven, klachten of middelen" },
-  { key: "feiten", label: "Feiten", short: "Feiten", criterion: "feiten: weergave van vaststaande feiten of de voorgeschiedenis, zonder juridisch oordeel" },
-  { key: "proces", label: "Procesverloop", short: "Proces", criterion: "procesverloop: processtukken, zittingen, bevoegdheid, ontvankelijkheid, termijnen, bewijsopdracht of proceskosten" },
-  { key: "beslissing", label: "Beslissing", short: "Beslissing", criterion: "beslissing: het dictum, wat de rechter toewijst, afwijst, vernietigt, veroordeelt of bepaalt" },
+  { key: "kader", label: "Juridisch kader", short: "Kader" },
+  { key: "toepassing", label: "Toepassing juridisch kader", short: "Toepassing" },
+  { key: "obiter", label: "Obiter dictum", short: "Obiter" },
+  { key: "stellingen", label: "Stellingen partijen", short: "Stellingen" },
+  { key: "feiten", label: "Feiten", short: "Feiten" },
+  { key: "proces", label: "Procesverloop", short: "Proces" },
+  { key: "beslissing", label: "Beslissing", short: "Beslissing" },
 ];
 MNT.ROLE_LABEL = Object.fromEntries(MNT.ROLES.map((r) => [r.key, r.label]));
 

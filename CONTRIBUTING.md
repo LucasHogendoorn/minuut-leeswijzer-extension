@@ -14,20 +14,38 @@ Er is geen build-stap en er zijn geen dependencies: het is gewone JavaScript en 
 
 ## De server
 
-De AI-aanroepen lopen via een Cloudflare Worker van Minuut. Die is geen onderdeel van deze
-repository en accepteert alleen de officiële extensie. Een uitgepakte installatie uit je
-eigen map krijgt een andere extensie-ID en wordt geweigerd.
+De AI-aanroepen lopen via een Cloudflare Worker (`worker/`). Die houdt de API-sleutel,
+bouwt de vragen aan het AI-model uit vaste sjablonen (`QUESTIONS` in
+`worker/src/index.js`), begrenst het aantal verzoeken en slaat niets op.
 
-Werk daarom tegen een eigen endpoint. Maak in de hoofdmap `dev-config.json` (staat in
-`.gitignore`):
+De productieserver accepteert alleen de officiële extensie. Een uitgepakte installatie uit
+je eigen map krijgt een andere extensie-ID en wordt geweigerd. Draai de Worker daarom
+lokaal:
 
-```json
-{ "endpoint": "http://127.0.0.1:8787/v1/judge" }
-```
+1. Installeer [Wrangler](https://developers.cloudflare.com/workers/wrangler/install-and-update/)
+   en maak een sleutel voor de [Vercel AI Gateway](https://vercel.com/docs/ai-gateway).
+2. Maak `worker/.dev.vars` (staat in `.gitignore`; commit dit nooit):
 
-Alleen een uitgepakte installatie leest dit bestand; de store-versie gebruikt altijd de
-productieserver. Het endpoint moet CORS toestaan voor de `chrome-extension://`-origin van
-je installatie.
+   ```sh
+   AI_GATEWAY_API_KEY=je-sleutel
+   ALLOWED_ORIGINS=
+   ```
+
+   Een lege `ALLOWED_ORIGINS` laat elke uitgepakte extensie toe. Lokaal is geen `RL_SALT`
+   nodig.
+3. `cd worker && wrangler dev --port 8787`
+4. Maak in de hoofdmap `dev-config.json` (staat ook in `.gitignore`):
+
+   ```json
+   { "endpoint": "http://127.0.0.1:8787/v1/judge" }
+   ```
+
+   Alleen een uitgepakte installatie leest dit bestand; de store-versie gebruikt altijd de
+   productieserver. Herlaad daarna de extensie.
+
+Wie de Worker zelf deployt, zet de secrets met `wrangler secret put AI_GATEWAY_API_KEY` en
+`wrangler secret put RL_SALT`, en de eigen extensie-ID in `ALLOWED_ORIGINS` in
+`worker/wrangler.toml`.
 
 **Verzoek** (`POST`, JSON):
 
@@ -54,6 +72,7 @@ je installatie.
 | `src/panel.js`, `src/panel.css` | Het zijpaneel |
 | `src/results.js` | De zoekresultaten |
 | `options/` | Welkomst- en privacypagina |
+| `worker/src/index.js` | De server: vaste vragen aan het AI-model, limieten, doorgeven zonder opslag |
 
 ## Uitgangspunten
 

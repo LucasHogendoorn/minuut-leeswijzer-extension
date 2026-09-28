@@ -1,6 +1,10 @@
 # Local development: points the extension at another endpoint.
 dev-config.json
 
+# Worker secrets for wrangler dev, and its local state
+worker/.dev.vars
+worker/.wrangler/
+
 # Build output
 dist/
 

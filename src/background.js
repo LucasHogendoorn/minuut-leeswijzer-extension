@@ -4,7 +4,7 @@
 // session: answers are cached in chrome.storage.session, which the browser
 // wipes when it closes.
 
-// Minuut's Worker (not in this repo; see README.md for its request format).
+// Minuut's production Worker (worker/; see CONTRIBUTING.md to run your own).
 const PRODUCTION_ENDPOINT = "https://minuut-leeswijzer.lucas-hogendoorn.workers.dev/v1/judge";
 const CACHE_PREFIX = "jev:";
 const MAX_ATTEMPTS = 4;

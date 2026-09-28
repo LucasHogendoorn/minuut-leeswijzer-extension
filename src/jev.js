@@ -1,7 +1,7 @@
 // Minuut Leeswijzer: what we send to Jev and how we read its answers.
 // Jev writes nothing. Per rechtsoverweging it returns a probability (does this
 // touch the question?), a choice (which category is it?) and a score (how
-// useful is it?). The question templates live in Minuut's Worker (not in this repo)
+// useful is it?). The question templates live in the Worker (worker/src/index.js)
 // so the free endpoint cannot be used for anything else; the extension only
 // changes visibility and order.
 
