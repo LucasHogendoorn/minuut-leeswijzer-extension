@@ -86,7 +86,7 @@ export function restore(deltas) {
 // development builds and junk, counts as "other" (review 1, finding 8), so
 // made-up versions cannot fill a day's row. At a release, add the new version
 // here and deploy the Worker before the extension (CONTRIBUTING.md).
-export const VERSIONS = new Set(["1.0.0", "1.0.1", "1.1.0"]);
+export const VERSIONS = new Set(["1.0.0", "1.0.1", "1.1.0", "1.1.1"]);
 export const versionLabel = (v) => (typeof v === "string" && VERSIONS.has(v) ? v : "other");
 
 // ---- In the global Limiter Durable Object -----------------------------------------------

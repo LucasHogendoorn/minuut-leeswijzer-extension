@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Minuut Leeswijzer",
   "short_name": "Leeswijzer",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Toont in uitspraken op Rechtspraak.nl, Curia en EUR-Lex meteen de kernoverwegingen. Gratis, zonder account, uw vraag blijft privé.",
   "icons": {
     "16": "icons/icon-16.png",

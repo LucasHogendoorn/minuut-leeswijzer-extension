@@ -26,8 +26,9 @@ ALLOWED_ORIGINS = "chrome-extension://djlkngghkpadabjgmegaeelmffhhljfe,chrome-ex
 # items 600/10 s and 1800/min), with free in-isolate checks in front; globally
 # 3000 Jev calls/min and 80000/day, reported by each isolate at most every 10 s.
 # The global Limiter also keeps the anonymous daily counters (src/stats.js) in
-# its SQLite storage, and each ping Limiter the day it last counted a ping;
-# same class, so no new migration.
+# its SQLite storage, and each ping Limiter (one per network per day) what it
+# counted that day, deleted by an alarm at day end; same class, so no new
+# migration.
 [[durable_objects.bindings]]
 name = "LIMITER"
 class_name = "Limiter"

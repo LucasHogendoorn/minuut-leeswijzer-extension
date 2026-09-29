@@ -417,8 +417,8 @@ test("readAnswers: undecodable, oversized or wrong-shape rows are misses", async
 });
 
 test("version allowlist", () => {
-  for (const v of ["1.0.0", "1.0.1", "1.1.0"]) assert.equal(versionLabel(v), v);
-  for (const v of ["1.1.1", "1.12.34", "2.0.0", "1.1", "1.1.0.1", "01.1.0", "1.1.0-beta", "", null, 1.1, "__proto__"]) assert.equal(versionLabel(v), "other", String(v));
+  for (const v of ["1.0.0", "1.0.1", "1.1.0", "1.1.1"]) assert.equal(versionLabel(v), v);
+  for (const v of ["1.1.2", "1.12.34", "2.0.0", "1.1", "1.1.0.1", "01.1.0", "1.1.0-beta", "", null, 1.1, "__proto__"]) assert.equal(versionLabel(v), "other", String(v));
 });
 
 test("ping: one active and three installs per /48 per day, counted only when allowed", async () => {
